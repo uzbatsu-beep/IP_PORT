@@ -241,7 +241,7 @@ where
                 if cancel.is_cancelled() {
                     break;
                 }
-                let Ok(idx) = next.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |idx| {
+                let Ok(idx) = next.try_update(Ordering::Relaxed, Ordering::Relaxed, |idx| {
                     (idx < total).then(|| idx + 1)
                 }) else {
                     break;
