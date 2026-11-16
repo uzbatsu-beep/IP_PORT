@@ -1,0 +1,1954 @@
+use std::net::IpAddr;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use crate::scanner::targets;
+use crate::scanner::{self, ScanConfig, ScanEvent, ScanHandle, ScanResult};
+use crate::ui;
+
+/// Максимальное число событий сканера, обрабатываемых за один кадр UI.
+pub const MAX_EVENTS_PER_FRAME: usize = 1024;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SortColumn {
+    #[default]
+    Address,
+    Port,
+    Service,
+    Latency,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StatusLevel {
+    #[default]
+    Idle,
+    Running,
+    Stopping,
+    Success,
+    Error,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScopePreview {
+    pub targets: usize,
+    pub ports: usize,
+    pub probes: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResultRow {
+    pub raw: ScanResult,
+    pub ip_text: String,
+    pub port_text: String,
+    pub latency_text: String,
+}
+
+impl ResultRow {
+    fn from_result(raw: ScanResult) -> Self {
+        let ip_text = raw.ip.to_string();
+        let port_text = raw.port.to_string();
+        let latency_text = format!("{:.2} ms", raw.rtt.as_secs_f64() * 1000.0);
+        Self {
+            raw,
+            ip_text,
+            port_text,
+            latency_text,
+        }
+    }
+
+    fn matches_lowercase_query(&self, query_lower: &str) -> bool {
+        query_lower.is_empty()
+            || contains_ascii_case_insensitive(&self.ip_text, query_lower)
+            || self.port_text.contains(query_lower)
+            || contains_ascii_case_insensitive(self.raw.service, query_lower)
+    }
+}
+
+struct InputCache {
+    targets_raw: String,
+    targets: Result<Vec<IpAddr>, String>,
+    ports_raw: String,
+    ports: Result<Vec<u16>, String>,
+    preview: Result<ScopePreview, String>,
+}
+
+impl InputCache {
+    fn new(targets_input: &str, ports_input: &str) -> Self {
+        let targets = targets::parse_targets(targets_input);
+        let ports = targets::parse_ports(ports_input);
+        let preview = Self::compute_preview(&targets, &ports);
+        Self {
+            targets_raw: targets_input.to_owned(),
+            targets,
+            ports_raw: ports_input.to_owned(),
+            ports,
+            preview,
+        }
+    }
+
+    fn sync(&mut self, targets_input: &str, ports_input: &str) {
+        let mut changed = false;
+        if self.targets_raw != targets_input {
+            self.targets_raw.clear();
+            self.targets_raw.push_str(targets_input);
+            self.targets = targets::parse_targets(targets_input);
+            changed = true;
+        }
+        if self.ports_raw != ports_input {
+            self.ports_raw.clear();
+            self.ports_raw.push_str(ports_input);
+            self.ports = targets::parse_ports(ports_input);
+            changed = true;
+        }
+        if changed {
+            self.preview = Self::compute_preview(&self.targets, &self.ports);
+        }
+    }
+
+    fn compute_preview(
+        targets: &Result<Vec<IpAddr>, String>,
+        ports: &Result<Vec<u16>, String>,
+    ) -> Result<ScopePreview, String> {
+        let targets_len = match targets {
+            Ok(list) => list.len(),
+            Err(err) => return Err(format!("Targets: {err}")),
+        };
+        let ports_len = match ports {
+            Ok(list) => list.len(),
+            Err(err) => return Err(format!("Ports: {err}")),
+        };
+        let probes = targets_len
+            .checked_mul(ports_len)
+            .ok_or_else(|| "Scan scope is too large for this platform".to_owned())?;
+        Ok(ScopePreview {
+            targets: targets_len,
+            ports: ports_len,
+            probes,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Toast {
+    pub message: String,
+    pub created_at: Instant,
+    pub duration: Duration,
+}
+
+pub struct App {
+    pub targets_input: String,
+    pub ports_input: String,
+    pub timeout_ms: u64,
+    pub concurrency: usize,
+
+    pub status: String,
+    pub status_level: StatusLevel,
+    pub results: Vec<ScanResult>,
+    pub results_filter: String,
+    pub sort_column: SortColumn,
+    pub sort_ascending: bool,
+    pub selected_result: Option<usize>,
+
+    pub target_count: usize,
+    pub port_count: usize,
+    pub total_probes: usize,
+    pub done_probes: usize,
+    pub toasts: Vec<Toast>,
+    scan_started_at: Option<Instant>,
+
+    rows: Vec<ResultRow>,
+    visible_indices: Vec<usize>,
+    cached_filter: String,
+    cached_sort_column: SortColumn,
+    cached_sort_ascending: bool,
+    view_dirty: bool,
+    view_rebuilds: usize,
+
+    input_cache: InputCache,
+    scan: Option<ScanHandle>,
+    last_export_dir: Option<PathBuf>,
+    pub last_export_path: Option<PathBuf>,
+    pub scroll_to_selected: bool,
+}
+
+impl App {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        ui::theme::apply(&cc.egui_ctx);
+        Self::default_state()
+    }
+
+    pub fn default_state() -> Self {
+        let targets_input = "127.0.0.1".to_owned();
+        let ports_input = "22,80,443".to_owned();
+        let input_cache = InputCache::new(&targets_input, &ports_input);
+
+        Self {
+            targets_input,
+            ports_input,
+            timeout_ms: 800,
+            concurrency: 256,
+            status: String::new(),
+            status_level: StatusLevel::Idle,
+            results: Vec::new(),
+            results_filter: String::new(),
+            sort_column: SortColumn::Address,
+            sort_ascending: true,
+            selected_result: None,
+            target_count: 0,
+            port_count: 0,
+            total_probes: 0,
+            done_probes: 0,
+            toasts: Vec::new(),
+            scan_started_at: None,
+            rows: Vec::new(),
+            visible_indices: Vec::new(),
+            cached_filter: String::new(),
+            cached_sort_column: SortColumn::Address,
+            cached_sort_ascending: true,
+            view_dirty: false,
+            view_rebuilds: 0,
+            input_cache,
+            scan: None,
+            last_export_dir: None,
+            last_export_path: None,
+            scroll_to_selected: false,
+        }
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.scan.is_some()
+    }
+
+    pub fn is_stopping(&self) -> bool {
+        self.scan.as_ref().is_some_and(ScanHandle::is_cancelled)
+    }
+
+    pub fn refresh_input_preview(&mut self) -> Result<ScopePreview, &str> {
+        self.input_cache
+            .sync(&self.targets_input, &self.ports_input);
+        self.input_cache
+            .preview
+            .as_ref()
+            .copied()
+            .map_err(String::as_str)
+    }
+
+    pub fn can_start_scan(&mut self) -> bool {
+        !self.is_running() && self.refresh_input_preview().is_ok()
+    }
+
+    pub fn start_scan(&mut self) {
+        self.start_scan_with(scanner::spawn);
+    }
+
+    pub fn start_scan_with<F>(&mut self, spawn_fn: F)
+    where
+        F: FnOnce(ScanConfig) -> Result<ScanHandle, String>,
+    {
+        if self.is_running() {
+            return;
+        }
+
+        self.input_cache
+            .sync(&self.targets_input, &self.ports_input);
+        let preview = match &self.input_cache.preview {
+            Ok(preview) => *preview,
+            Err(err) => {
+                self.set_status(StatusLevel::Error, err.clone());
+                return;
+            }
+        };
+        let targets = match &self.input_cache.targets {
+            Ok(targets) => targets.clone(),
+            Err(err) => {
+                self.set_status(StatusLevel::Error, format!("Targets: {err}"));
+                return;
+            }
+        };
+        let ports = match &self.input_cache.ports {
+            Ok(ports) => ports.clone(),
+            Err(err) => {
+                self.set_status(StatusLevel::Error, format!("Ports: {err}"));
+                return;
+            }
+        };
+
+        let config = ScanConfig {
+            targets,
+            ports,
+            timeout: Duration::from_millis(self.timeout_ms),
+            concurrency: self.concurrency,
+        };
+        let handle = match spawn_fn(config) {
+            Ok(handle) => handle,
+            Err(err) => {
+                self.set_status(StatusLevel::Error, format!("Error: {err}"));
+                return;
+            }
+        };
+
+        self.clear_results_storage();
+        self.selected_result = None;
+        self.target_count = preview.targets;
+        self.port_count = preview.ports;
+        self.total_probes = preview.probes;
+        self.done_probes = 0;
+        self.scan_started_at = Some(Instant::now());
+        self.set_status(
+            StatusLevel::Running,
+            format!(
+                "Scanning {} target{} × {} port{} ({} probes)",
+                preview.targets,
+                if preview.targets == 1 { "" } else { "s" },
+                preview.ports,
+                if preview.ports == 1 { "" } else { "s" },
+                self.total_probes
+            ),
+        );
+
+        self.scan = Some(handle);
+    }
+
+    pub fn stop_scan(&mut self) {
+        if let Some(handle) = &self.scan
+            && !handle.is_cancelled()
+        {
+            handle.cancel();
+            self.set_status(StatusLevel::Stopping, "Stopping scan...".to_owned());
+        }
+    }
+
+    /// Очищает накопленные на текущий момент открытые порты.
+    /// Если сканирование ещё идёт, новые открытые порты продолжат поступать.
+    pub fn clear_results(&mut self) {
+        if self.results.is_empty() {
+            return;
+        }
+        self.clear_results_storage();
+        if !self.is_running() {
+            self.set_status(StatusLevel::Idle, "Results cleared".to_owned());
+        }
+    }
+
+    pub fn push_result(&mut self, result: ScanResult) {
+        self.rows.push(ResultRow::from_result(result.clone()));
+        self.results.push(result);
+        self.view_dirty = true;
+    }
+
+    pub fn ensure_results_view(&mut self) {
+        let filter_changed = self.cached_filter != self.results_filter;
+        let sort_changed = self.cached_sort_column != self.sort_column
+            || self.cached_sort_ascending != self.sort_ascending;
+
+        if !self.view_dirty && !filter_changed && !sort_changed {
+            return;
+        }
+
+        let query_lower = self.results_filter.trim().to_ascii_lowercase();
+        self.visible_indices.clear();
+        for (idx, row) in self.rows.iter().enumerate() {
+            if row.matches_lowercase_query(&query_lower) {
+                self.visible_indices.push(idx);
+            }
+        }
+
+        let rows = &self.rows;
+        let sort_column = self.sort_column;
+        let sort_ascending = self.sort_ascending;
+        self.visible_indices.sort_by(|&a_idx, &b_idx| {
+            let a = &rows[a_idx].raw;
+            let b = &rows[b_idx].raw;
+            let ordering = match sort_column {
+                SortColumn::Address => a.ip.cmp(&b.ip).then_with(|| a.port.cmp(&b.port)),
+                SortColumn::Port => a.port.cmp(&b.port).then_with(|| a.ip.cmp(&b.ip)),
+                SortColumn::Service => a
+                    .service
+                    .cmp(b.service)
+                    .then_with(|| a.ip.cmp(&b.ip))
+                    .then_with(|| a.port.cmp(&b.port)),
+                SortColumn::Latency => a
+                    .rtt
+                    .cmp(&b.rtt)
+                    .then_with(|| a.ip.cmp(&b.ip))
+                    .then_with(|| a.port.cmp(&b.port)),
+            };
+
+            if sort_ascending {
+                ordering
+            } else {
+                ordering.reverse()
+            }
+        });
+
+        self.cached_filter.clear();
+        self.cached_filter.push_str(&self.results_filter);
+        self.cached_sort_column = self.sort_column;
+        self.cached_sort_ascending = self.sort_ascending;
+        self.view_dirty = false;
+        self.view_rebuilds += 1;
+    }
+
+    pub fn visible_indices(&self) -> &[usize] {
+        &self.visible_indices
+    }
+
+    pub fn row(&self, index: usize) -> &ResultRow {
+        &self.rows[index]
+    }
+
+    #[cfg(test)]
+    pub fn view_rebuilds(&self) -> usize {
+        self.view_rebuilds
+    }
+
+    pub fn progress_fraction(&self) -> f32 {
+        if self.total_probes == 0 {
+            return 0.0;
+        }
+        (self.done_probes as f32 / self.total_probes as f32).clamp(0.0, 1.0)
+    }
+
+    pub fn progress_text(&self) -> String {
+        if self.total_probes == 0 {
+            return "Idle".to_owned();
+        }
+        if let Some(started_at) = self.scan_started_at {
+            let elapsed = started_at.elapsed().as_secs_f64();
+            let rate = if elapsed > 0.0 {
+                self.done_probes as f64 / elapsed
+            } else {
+                0.0
+            };
+            let remaining = self.total_probes.saturating_sub(self.done_probes);
+            let eta = if self.is_running() && rate > 0.0 {
+                format!(" · ETA {:.1}s", remaining as f64 / rate)
+            } else {
+                String::new()
+            };
+            format!(
+                "{}/{} probes · {:.1}s · {:.0} probes/s{eta}",
+                self.done_probes, self.total_probes, elapsed, rate
+            )
+        } else {
+            format!("{}/{} probes", self.done_probes, self.total_probes)
+        }
+    }
+
+    pub fn export_csv(&mut self) {
+        self.export("csv");
+    }
+
+    pub fn export_json(&mut self) {
+        self.export("json");
+    }
+
+    fn export(&mut self, extension: &str) {
+        let file_name = crate::export::default_export_filename(extension);
+        let mut dialog = rfd::FileDialog::new()
+            .set_file_name(&file_name)
+            .add_filter(extension.to_uppercase(), &[extension]);
+        if let Some(dir) = &self.last_export_dir {
+            dialog = dialog.set_directory(dir);
+        }
+
+        let Some(path) = dialog.save_file() else {
+            return;
+        };
+        self.last_export_dir = path.parent().map(PathBuf::from);
+        self.last_export_path = Some(path.clone());
+
+        let snapshot_count = self.results.len();
+        let outcome = match extension {
+            "csv" => crate::export::save_csv(&path, &self.results),
+            _ => crate::export::save_json(&path, &self.results),
+        };
+
+        match outcome {
+            Ok(()) => {
+                let level = if self.is_stopping() {
+                    StatusLevel::Stopping
+                } else if self.is_running() {
+                    StatusLevel::Running
+                } else {
+                    StatusLevel::Success
+                };
+                self.set_status(
+                    level,
+                    format!("Saved {snapshot_count} results to {}", path.display()),
+                );
+                let saved_file_name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&file_name);
+                self.show_toast(format!(
+                    "Exported {snapshot_count} results to {saved_file_name}"
+                ));
+            }
+            Err(err) => self.set_status(StatusLevel::Error, format!("Export failed: {err}")),
+        }
+    }
+
+    fn clear_results_storage(&mut self) {
+        self.results.clear();
+        self.rows.clear();
+        self.visible_indices.clear();
+        self.selected_result = None;
+        self.view_dirty = false;
+    }
+
+    pub fn set_status(&mut self, level: StatusLevel, status: String) {
+        self.status_level = level;
+        self.status = status;
+    }
+
+    pub fn show_toast(&mut self, message: impl Into<String>) {
+        self.toasts.push(Toast {
+            message: message.into(),
+            created_at: Instant::now(),
+            duration: Duration::from_millis(2200),
+        });
+    }
+
+    pub fn copy_text_with_toast(&mut self, ctx: &egui::Context, text: String, toast_msg: String) {
+        ctx.copy_text(text);
+        self.show_toast(toast_msg);
+    }
+
+    pub fn render_toasts(&mut self, ctx: &egui::Context) {
+        let now = Instant::now();
+        self.toasts
+            .retain(|toast| now.duration_since(toast.created_at) < toast.duration);
+
+        if self.toasts.is_empty() {
+            return;
+        }
+
+        ctx.request_repaint_after(Duration::from_millis(40));
+
+        let screen_rect = ctx
+            .input(|i| i.raw.screen_rect)
+            .unwrap_or(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1180.0, 760.0),
+            ));
+        egui::Area::new(egui::Id::unique("app_toasts"))
+            .fixed_pos(egui::pos2(
+                (screen_rect.max.x - 280.0).max(10.0),
+                (screen_rect.max.y - 65.0).max(10.0),
+            ))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                for toast in &self.toasts {
+                    let elapsed = now.duration_since(toast.created_at).as_secs_f32();
+                    let total = toast.duration.as_secs_f32();
+                    let alpha = if elapsed > total - 0.4 {
+                        ((total - elapsed) / 0.4).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+
+                    egui::Frame::popup(ui.style())
+                        .fill(egui::Color32::from_rgba_premultiplied(
+                            0x25,
+                            0x2a,
+                            0x33,
+                            (alpha * 245.0) as u8,
+                        ))
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            ui::theme::ACCENT.gamma_multiply(alpha),
+                        ))
+                        .inner_margin(egui::Margin::symmetric(12, 8))
+                        .corner_radius(egui::CornerRadius::same(6))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("✔")
+                                        .color(ui::theme::SUCCESS.gamma_multiply(alpha))
+                                        .strong(),
+                                );
+                                ui.label(
+                                    egui::RichText::new(&toast.message)
+                                        .color(egui::Color32::from_rgba_premultiplied(
+                                            0xd8,
+                                            0xdd,
+                                            0xe6,
+                                            (alpha * 255.0) as u8,
+                                        ))
+                                        .small(),
+                                );
+                            });
+                        });
+                }
+            });
+    }
+
+    pub(crate) fn drain_events_with_budget(&mut self, max_events: usize) -> usize {
+        if max_events == 0 {
+            return 0;
+        }
+
+        let mut processed = 0;
+        let mut finished = false;
+        let mut pending_open = Vec::new();
+        let mut finished_state = None;
+        let mut failed_message = None;
+
+        if let Some(handle) = &mut self.scan {
+            while processed < max_events {
+                let Some(event) = handle.try_recv() else {
+                    break;
+                };
+                processed += 1;
+
+                match event {
+                    ScanEvent::Started { total } => {
+                        self.total_probes = total;
+                        self.done_probes = 0;
+                    }
+                    ScanEvent::Open(result) => pending_open.push(result),
+                    ScanEvent::Progress { done, total } => {
+                        self.done_probes = self.done_probes.max(done);
+                        self.total_probes = total;
+                    }
+                    ScanEvent::Finished { done, cancelled } => {
+                        finished_state = Some((done, cancelled));
+                        finished = true;
+                        break;
+                    }
+                    ScanEvent::Failed { message } => {
+                        failed_message = Some(message);
+                        finished = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        for result in pending_open {
+            self.push_result(result);
+        }
+
+        if let Some((done, cancelled)) = finished_state {
+            self.done_probes = self.done_probes.max(done);
+            let elapsed = self
+                .scan_started_at
+                .take()
+                .map(|started_at| started_at.elapsed().as_secs_f64())
+                .unwrap_or_default();
+            if cancelled {
+                self.set_status(
+                    StatusLevel::Idle,
+                    format!(
+                        "Cancelled after {} probes in {:.1}s, {} open ports",
+                        self.done_probes,
+                        elapsed,
+                        self.results.len()
+                    ),
+                );
+            } else {
+                self.set_status(
+                    StatusLevel::Success,
+                    format!(
+                        "Done in {:.1}s · {} probes · {} open ports",
+                        elapsed,
+                        self.done_probes,
+                        self.results.len()
+                    ),
+                );
+            }
+        } else if let Some(message) = failed_message {
+            self.scan_started_at = None;
+            self.set_status(StatusLevel::Error, format!("Scan failed: {message}"));
+        }
+
+        if finished {
+            self.scan = None;
+        }
+
+        processed
+    }
+}
+
+fn contains_ascii_case_insensitive(haystack: &str, needle_lower: &str) -> bool {
+    let needle = needle_lower.as_bytes();
+    if needle.is_empty() {
+        return true;
+    }
+    let hay = haystack.as_bytes();
+    if needle.len() > hay.len() {
+        return false;
+    }
+    hay.windows(needle.len()).any(|window| {
+        window
+            .iter()
+            .zip(needle.iter())
+            .all(|(h, n)| h.to_ascii_lowercase() == *n)
+    })
+}
+
+impl App {
+    pub fn update_ui(&mut self, ui: &mut egui::Ui) {
+        let processed = self.drain_events_with_budget(MAX_EVENTS_PER_FRAME);
+
+        let is_cmd = |m: &egui::Modifiers| m.command || m.ctrl || m.mac_cmd;
+        let command = ui.input(|i| is_cmd(&i.modifiers));
+        let text_input_focused = ui.ctx().egui_wants_keyboard_input();
+        let start_requested = ui.input(|i| is_cmd(&i.modifiers) && i.key_pressed(egui::Key::Enter));
+        let stop_requested = !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::Escape));
+        let copy_requested = !text_input_focused
+            && ui.input(|i| is_cmd(&i.modifiers) && i.key_pressed(egui::Key::C));
+        let export_csv_requested = !text_input_focused
+            && ui.input(|i| {
+                is_cmd(&i.modifiers) && i.key_pressed(egui::Key::E) && !i.modifiers.shift
+            });
+        let export_json_requested = !text_input_focused
+            && ui.input(|i| {
+                is_cmd(&i.modifiers) && i.modifiers.shift && i.key_pressed(egui::Key::E)
+            });
+
+        if start_requested && self.can_start_scan() {
+            self.start_scan();
+        }
+        if stop_requested && self.is_running() {
+            self.stop_scan();
+        }
+        if export_csv_requested && !self.results.is_empty() {
+            self.export_csv();
+        }
+        if export_json_requested && !self.results.is_empty() {
+            self.export_json();
+        }
+        if copy_requested
+            && let Some(index) = self.selected_result
+            && let Some(result) = self.results.get(index)
+        {
+            let text = format!("{}:{}", result.ip, result.port);
+            self.copy_text_with_toast(ui.ctx(), text.clone(), format!("Copied {text}"));
+        }
+        if copy_requested && self.selected_result.is_none() && !self.results.is_empty() {
+            let all_results = self
+                .results
+                .iter()
+                .map(|result| format!("{}:{}", result.ip, result.port))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let count = self.results.len();
+            self.copy_text_with_toast(
+                ui.ctx(),
+                all_results,
+                format!("Copied {count} result{}", if count == 1 { "" } else { "s" }),
+            );
+        }
+
+        let arrow_down = !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
+        let arrow_up = !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
+        let home_pressed = !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::Home));
+        let end_pressed = !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::End));
+
+        self.ensure_results_view();
+        if arrow_down && !self.visible_indices.is_empty() {
+            let next_index = match self.selected_result {
+                None => self.visible_indices[0],
+                Some(current) => {
+                    let pos = self
+                        .visible_indices
+                        .iter()
+                        .position(|&idx| idx == current)
+                        .unwrap_or(0);
+                    let next_pos = (pos + 1).min(self.visible_indices.len() - 1);
+                    self.visible_indices[next_pos]
+                }
+            };
+            self.selected_result = Some(next_index);
+            self.scroll_to_selected = true;
+        }
+        if arrow_up && !self.visible_indices.is_empty() {
+            let prev_index = match self.selected_result {
+                None => *self.visible_indices.last().unwrap(),
+                Some(current) => {
+                    let pos = self
+                        .visible_indices
+                        .iter()
+                        .position(|&idx| idx == current)
+                        .unwrap_or(0);
+                    let prev_pos = pos.saturating_sub(1);
+                    self.visible_indices[prev_pos]
+                }
+            };
+            self.selected_result = Some(prev_index);
+            self.scroll_to_selected = true;
+        }
+        if home_pressed && !self.visible_indices.is_empty() {
+            self.selected_result = Some(self.visible_indices[0]);
+            self.scroll_to_selected = true;
+        }
+        if end_pressed && !self.visible_indices.is_empty() {
+            self.selected_result = self.visible_indices.last().copied();
+            self.scroll_to_selected = true;
+        }
+
+        let row_action_requested = !text_input_focused
+            && !command
+            && ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space));
+        if row_action_requested
+            && let Some(index) = self.selected_result
+            && let Some(result) = self.results.get(index)
+        {
+            match result.port {
+                80 | 8000 | 8008 | 8080 | 8081 | 8200 | 8888 | 443 | 8443 => {
+                    let scheme = if result.port == 443 || result.port == 8443 {
+                        "https"
+                    } else {
+                        "http"
+                    };
+                    let host = if result.ip.is_ipv6() {
+                        format!("[{}]", result.ip)
+                    } else {
+                        result.ip.to_string()
+                    };
+                    let url = format!("{scheme}://{host}:{}", result.port);
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                    self.show_toast(format!("Opened {}:{} in browser", result.ip, result.port));
+                }
+                _ => {
+                    let text = format!("{}:{}", result.ip, result.port);
+                    self.copy_text_with_toast(ui.ctx(), text.clone(), format!("Copied {text}"));
+                }
+            }
+        }
+
+        if command
+            && !ui.ctx().egui_wants_keyboard_input()
+            && ui.input(|i| i.key_pressed(egui::Key::F))
+        {
+            ui.memory_mut(|memory| memory.request_focus(egui::Id::unique("results_filter")));
+        }
+
+        if self.is_running() {
+            let delay = if processed >= MAX_EVENTS_PER_FRAME {
+                Duration::ZERO
+            } else {
+                Duration::from_millis(16)
+            };
+            ui.ctx().request_repaint_after(delay);
+        }
+
+        egui::Panel::left("controls")
+            .resizable(true)
+            .default_size(320.0)
+            .size_range(280.0..=460.0)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui::sidebar::show(self, ui);
+                });
+            });
+
+        egui::CentralPanel::default().show(ui, |ui| {
+            ui::results::show(self, ui);
+        });
+
+        self.render_toasts(ui.ctx());
+    }
+}
+
+impl eframe::App for App {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.update_ui(ui);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+    use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
+
+    fn attach_mock_scan(
+        app: &mut App,
+    ) -> (
+        mpsc::Sender<ScanEvent>,
+        std::sync::mpsc::Sender<ScanEvent>,
+        CancellationToken,
+    ) {
+        let (tx, rx) = mpsc::channel(64);
+        let (terminal_tx, terminal_rx) = std::sync::mpsc::channel();
+        let cancel = CancellationToken::new();
+        app.scan = Some(ScanHandle::from_channels(rx, terminal_rx, cancel.clone()));
+        (tx, terminal_tx, cancel)
+    }
+
+    fn sample_result(host: u8, port: u16, service: &'static str, rtt_ms: u64) -> ScanResult {
+        ScanResult {
+            ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, host)),
+            port,
+            service,
+            rtt: Duration::from_millis(rtt_ms),
+        }
+    }
+
+    #[test]
+    fn monotonic_progress_and_frame_budget_in_ui_state() {
+        let mut app = App::default_state();
+        let (tx, terminal_tx, _cancel) = attach_mock_scan(&mut app);
+
+        tx.blocking_send(ScanEvent::Started { total: 200 }).unwrap();
+        tx.blocking_send(ScanEvent::Progress {
+            done: 150,
+            total: 200,
+        })
+        .unwrap();
+        tx.blocking_send(ScanEvent::Progress {
+            done: 100,
+            total: 200,
+        })
+        .unwrap();
+        tx.blocking_send(ScanEvent::Open(sample_result(1, 80, "http", 5)))
+            .unwrap();
+        drop(tx);
+        terminal_tx
+            .send(ScanEvent::Finished {
+                done: 200,
+                cancelled: false,
+            })
+            .unwrap();
+
+        assert_eq!(app.drain_events_with_budget(2), 2);
+        assert_eq!(app.done_probes, 150);
+        assert!(app.is_running());
+
+        assert_eq!(app.drain_events_with_budget(2), 2);
+        assert_eq!(app.done_probes, 150);
+        assert_eq!(app.results.len(), 1);
+        assert!(app.is_running());
+
+        assert_eq!(app.drain_events_with_budget(2), 1);
+        assert_eq!(app.done_probes, 200);
+        assert!(!app.is_running());
+        assert_eq!(app.status_level, StatusLevel::Success);
+    }
+
+    #[test]
+    fn failed_event_sets_error_status_and_finishes_scan() {
+        let mut app = App::default_state();
+        let (tx, terminal_tx, _cancel) = attach_mock_scan(&mut app);
+        drop(tx);
+        terminal_tx
+            .send(ScanEvent::Failed {
+                message: "runtime failed".to_owned(),
+            })
+            .unwrap();
+
+        app.drain_events_with_budget(MAX_EVENTS_PER_FRAME);
+        assert!(!app.is_running());
+        assert_eq!(app.status_level, StatusLevel::Error);
+        assert!(app.status.contains("runtime failed"));
+    }
+
+    #[test]
+    fn results_view_caches_until_data_filter_or_sort_changes() {
+        let mut app = App::default_state();
+        app.push_result(sample_result(2, 443, "https", 20));
+        app.push_result(sample_result(1, 80, "http", 5));
+        app.push_result(sample_result(1, 22, "ssh", 12));
+
+        app.ensure_results_view();
+        assert_eq!(app.view_rebuilds(), 1);
+        let ordered_ports: Vec<u16> = app
+            .visible_indices()
+            .iter()
+            .map(|&idx| app.row(idx).raw.port)
+            .collect();
+        assert_eq!(ordered_ports, vec![22, 80, 443]);
+
+        // Idle frames must reuse the cached view without sorting or filtering again.
+        app.ensure_results_view();
+        app.ensure_results_view();
+        assert_eq!(app.view_rebuilds(), 1);
+
+        app.results_filter = "HTTP".to_owned();
+        app.ensure_results_view();
+        assert_eq!(app.view_rebuilds(), 2);
+        assert_eq!(app.visible_indices().len(), 2);
+
+        app.sort_column = SortColumn::Latency;
+        app.sort_ascending = false;
+        app.ensure_results_view();
+        assert_eq!(app.view_rebuilds(), 3);
+        let first = app.row(app.visible_indices()[0]).raw.port;
+        assert_eq!(first, 443);
+    }
+
+    #[test]
+    fn clear_during_running_scan_preserves_stream_for_new_hits() {
+        let mut app = App::default_state();
+        let (tx, terminal_tx, cancel) = attach_mock_scan(&mut app);
+
+        tx.blocking_send(ScanEvent::Started { total: 2 }).unwrap();
+        tx.blocking_send(ScanEvent::Open(sample_result(1, 22, "ssh", 3)))
+            .unwrap();
+        app.drain_events_with_budget(10);
+        assert_eq!(app.results.len(), 1);
+
+        app.clear_results();
+        assert!(app.results.is_empty());
+        assert!(app.is_running());
+
+        tx.blocking_send(ScanEvent::Open(sample_result(1, 80, "http", 4)))
+            .unwrap();
+        app.stop_scan();
+        assert!(cancel.is_cancelled());
+        assert!(app.is_stopping());
+        drop(tx);
+        terminal_tx
+            .send(ScanEvent::Finished {
+                done: 2,
+                cancelled: true,
+            })
+            .unwrap();
+
+        app.drain_events_with_budget(10);
+        assert_eq!(app.results.len(), 1);
+        assert_eq!(app.results[0].port, 80);
+    }
+
+    #[test]
+    fn progress_text_includes_elapsed_rate_and_eta_while_running() {
+        let mut app = App::default_state();
+        let (_tx, _terminal_tx, _cancel) = attach_mock_scan(&mut app);
+        app.scan_started_at = Some(Instant::now() - Duration::from_secs(2));
+        app.total_probes = 100;
+        app.done_probes = 50;
+
+        let progress = app.progress_text();
+        assert!(progress.contains("50/100 probes"));
+        assert!(progress.contains("2.0s"));
+        assert!(progress.contains("probes/s"));
+        assert!(progress.contains("ETA"));
+    }
+
+    #[test]
+    fn input_preview_reports_planned_scope_and_validation_errors() {
+        let mut app = App::default_state();
+        assert!(app.can_start_scan());
+        assert_eq!(
+            app.refresh_input_preview().unwrap(),
+            ScopePreview {
+                targets: 1,
+                ports: 3,
+                probes: 3
+            }
+        );
+
+        app.ports_input = "0".to_owned();
+        assert!(!app.can_start_scan());
+        assert!(app.refresh_input_preview().unwrap_err().contains("Ports:"));
+
+        app.start_scan();
+        assert_eq!(app.status_level, StatusLevel::Error);
+        assert!(!app.is_running());
+    }
+
+    #[test]
+    fn app_handles_spawn_failure_gracefully() {
+        let mut app = App::default_state();
+        assert!(app.can_start_scan());
+
+        app.start_scan_with(|_config| {
+            Err("Failed to start scanner thread: synthetic OS error".to_owned())
+        });
+
+        assert_eq!(app.status_level, StatusLevel::Error);
+        assert!(app.status.contains("Failed to start scanner thread"));
+        assert!(app.status.contains("synthetic OS error"));
+        assert!(!app.is_running());
+    }
+
+    #[test]
+    fn cached_frame_with_20k_results_avoids_rebuilding() {
+        let mut app = App::default_state();
+        for idx in 0..20_000u32 {
+            let ip = IpAddr::V4(Ipv4Addr::from(0x0a00_0001 + (idx / 100)));
+            let port = ((idx % 100) + 1) as u16;
+            app.push_result(ScanResult {
+                ip,
+                port,
+                service: crate::scanner::probe::service_name(port),
+                rtt: Duration::from_micros((idx % 5_000) as u64 + 100),
+            });
+        }
+
+        app.results_filter = "http".to_owned();
+        app.sort_column = SortColumn::Latency;
+        app.ensure_results_view();
+        assert_eq!(app.view_rebuilds(), 1);
+        assert!(!app.visible_indices().is_empty());
+
+        for _ in 0..60 {
+            app.ensure_results_view();
+        }
+        assert_eq!(app.view_rebuilds(), 1);
+    }
+
+    fn run_headless_frame(
+        app: &mut App,
+        ctx: &egui::Context,
+        size: egui::Vec2,
+        pixels_per_point: f32,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        ctx.set_pixels_per_point(pixels_per_point);
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(raw_input, |ui| {
+            app.update_ui(ui);
+        });
+        output.textures_delta.clear();
+        output
+    }
+
+    #[test]
+    fn keyboard_navigation_and_shortcuts_test() {
+        let mut app = App::default_state();
+        let ctx = egui::Context::default();
+        crate::ui::theme::apply(&ctx);
+
+        // 1. Ctrl+Enter starts scan
+        assert!(!app.is_running());
+        run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers {
+                    ctrl: true,
+                    command: true,
+                    ..Default::default()
+                }),
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        ctrl: true,
+                        command: true,
+                        ..Default::default()
+                    },
+                },
+            ],
+        );
+        assert!(app.is_running());
+
+        // 2. Escape while running requests stop
+        run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::default()),
+                egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        assert!(app.is_stopping());
+
+        // 3. Ctrl+C with selected row copies selected IP:Port
+        app.scan = None;
+        app.results.clear();
+        app.push_result(sample_result(1, 80, "http", 10));
+        app.push_result(sample_result(2, 443, "https", 25));
+        app.selected_result = Some(0);
+
+        let output1 = run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers {
+                    ctrl: true,
+                    command: true,
+                    ..Default::default()
+                }),
+                egui::Event::Key {
+                    key: egui::Key::C,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        ctrl: true,
+                        command: true,
+                        ..Default::default()
+                    },
+                },
+            ],
+        );
+        assert!(output1.platform_output.commands.iter().any(|cmd| matches!(
+            cmd,
+            egui::OutputCommand::CopyText(text) if text == "10.0.0.1:80"
+        )));
+        assert!(app.toasts.last().unwrap().message.contains("10.0.0.1:80"));
+
+        // 4. Ctrl+C without selection copies all IP:Port entries
+        app.selected_result = None;
+        let output2 = run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers {
+                    ctrl: true,
+                    command: true,
+                    ..Default::default()
+                }),
+                egui::Event::Key {
+                    key: egui::Key::C,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        ctrl: true,
+                        command: true,
+                        ..Default::default()
+                    },
+                },
+            ],
+        );
+        assert!(output2.platform_output.commands.iter().any(|cmd| matches!(
+            cmd,
+            egui::OutputCommand::CopyText(text) if text == "10.0.0.1:80\n10.0.0.2:443"
+        )));
+        assert!(app.toasts.last().unwrap().message.contains("2 results"));
+
+        // 5. Ctrl+F requests focus for filter
+        run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers {
+                    ctrl: true,
+                    command: true,
+                    ..Default::default()
+                }),
+                egui::Event::Key {
+                    key: egui::Key::F,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        ctrl: true,
+                        command: true,
+                        ..Default::default()
+                    },
+                },
+            ],
+        );
+        assert!(ctx.memory(|m| m.has_focus(egui::Id::unique("results_filter"))));
+
+        // 6. Escape while filter has focus clears filter
+        app.results_filter = "test-query".to_owned();
+        run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::default()),
+                egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        assert!(app.results_filter.is_empty());
+
+        // 7. Arrow keys navigate results table
+        app.selected_result = None;
+        run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::default()),
+                egui::Event::Key {
+                    key: egui::Key::ArrowDown,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        assert_eq!(app.selected_result, Some(0));
+
+        run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::default()),
+                egui::Event::Key {
+                    key: egui::Key::ArrowDown,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        assert_eq!(app.selected_result, Some(1));
+
+        // 8. ArrowUp moves back
+        run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::default()),
+                egui::Event::Key {
+                    key: egui::Key::ArrowUp,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        assert_eq!(app.selected_result, Some(0));
+
+        // 9. End key selects last item
+        run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::default()),
+                egui::Event::Key {
+                    key: egui::Key::End,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        assert_eq!(app.selected_result, Some(1));
+
+        // 10. Home key selects first item
+        run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::default()),
+                egui::Event::Key {
+                    key: egui::Key::Home,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        assert_eq!(app.selected_result, Some(0));
+
+        // 11. Enter on web port (item 0 is port 80) triggers browser open
+        let output_web = run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::default()),
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        assert!(
+            output_web
+                .platform_output
+                .commands
+                .iter()
+                .any(|cmd| matches!(
+                    cmd,
+                    egui::OutputCommand::OpenUrl(open_url) if open_url.url == "http://10.0.0.1:80"
+                ))
+        );
+        assert!(
+            app.toasts
+                .last()
+                .unwrap()
+                .message
+                .contains("Opened 10.0.0.1:80")
+        );
+    }
+
+    #[test]
+    fn toast_notifications_render_and_expire() {
+        let mut app = App::default_state();
+        let ctx = egui::Context::default();
+        crate::ui::theme::apply(&ctx);
+
+        app.show_toast("Copied 127.0.0.1:80");
+        assert_eq!(app.toasts.len(), 1);
+
+        let output = run_headless_frame(&mut app, &ctx, egui::vec2(1180.0, 760.0), 1.0, Vec::new());
+        assert!(!output.shapes.is_empty());
+        assert_eq!(app.toasts.len(), 1);
+
+        // Advance time to expire toast
+        app.toasts[0].created_at = Instant::now() - Duration::from_secs(5);
+        let _ = run_headless_frame(&mut app, &ctx, egui::vec2(1180.0, 760.0), 1.0, Vec::new());
+        assert!(app.toasts.is_empty());
+    }
+
+    #[test]
+    fn window_resizing_and_dpi_scaling_test() {
+        let mut app = App::default_state();
+        let ctx = egui::Context::default();
+        crate::ui::theme::apply(&ctx);
+
+        for idx in 0..20_000u32 {
+            let ip = IpAddr::V4(Ipv4Addr::from(0x0a00_0001 + (idx / 100)));
+            let port = ((idx % 100) + 1) as u16;
+            app.push_result(ScanResult {
+                ip,
+                port,
+                service: crate::scanner::probe::service_name(port),
+                rtt: Duration::from_micros((idx % 5_000) as u64 + 100),
+            });
+        }
+
+        let resolutions = [
+            egui::vec2(880.0, 560.0),   // Minimum size
+            egui::vec2(1180.0, 760.0),  // Default initial size
+            egui::vec2(1920.0, 1080.0), // Full HD
+            egui::vec2(3840.0, 2160.0), // 4K UHD
+        ];
+
+        let dpi_scales = [1.0, 1.25, 1.5, 2.0];
+
+        for &res in &resolutions {
+            for &dpi in &dpi_scales {
+                let output = run_headless_frame(&mut app, &ctx, res, dpi, Vec::new());
+                assert!(
+                    output.shapes.len() > 10,
+                    "Expected rendered shapes at size {res:?} and DPI {dpi}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn theme_wcag_contrast_conformance_test() {
+        fn srgb_to_linear(channel: u8) -> f64 {
+            let c = channel as f64 / 255.0;
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        }
+
+        fn relative_luminance(c: egui::Color32) -> f64 {
+            0.2126 * srgb_to_linear(c.r())
+                + 0.7152 * srgb_to_linear(c.g())
+                + 0.0722 * srgb_to_linear(c.b())
+        }
+
+        fn contrast_ratio(c1: egui::Color32, c2: egui::Color32) -> f64 {
+            let l1 = relative_luminance(c1);
+            let l2 = relative_luminance(c2);
+            let (lighter, darker) = if l1 > l2 { (l1, l2) } else { (l2, l1) };
+            (lighter + 0.05) / (darker + 0.05)
+        }
+
+        let panel_fill = egui::Color32::from_rgb(0x16, 0x18, 0x1d);
+        let window_fill = egui::Color32::from_rgb(0x1c, 0x1f, 0x26);
+        let text_color = egui::Color32::from_rgb(0xd8, 0xdd, 0xe6);
+
+        let ratio_panel = contrast_ratio(text_color, panel_fill);
+        let ratio_window = contrast_ratio(text_color, window_fill);
+        let ratio_accent = contrast_ratio(crate::ui::theme::ACCENT, panel_fill);
+        let ratio_error = contrast_ratio(crate::ui::theme::ERROR, panel_fill);
+
+        // WCAG AAA requires >= 7.0 for normal text
+        assert!(
+            ratio_panel >= 7.0,
+            "Text contrast on panel: {ratio_panel:.2} (requires >= 7.0 for WCAG AAA)"
+        );
+        assert!(
+            ratio_window >= 7.0,
+            "Text contrast on window: {ratio_window:.2} (requires >= 7.0 for WCAG AAA)"
+        );
+        // WCAG AA requires >= 4.5 for UI graphics / alerts
+        assert!(
+            ratio_accent >= 4.5,
+            "Accent contrast on panel: {ratio_accent:.2} (requires >= 4.5 for WCAG AA)"
+        );
+        assert!(
+            ratio_error >= 4.5,
+            "Error contrast on panel: {ratio_error:.2} (requires >= 4.5 for WCAG AA)"
+        );
+    }
+
+    #[test]
+    fn stress_benchmark_events_sorting_and_rendering() {
+        let mut app = App::default_state();
+        let ctx = egui::Context::default();
+        crate::ui::theme::apply(&ctx);
+
+        const COUNT: u32 = 20_000;
+
+        // 1. Measure batch event ingestion
+        let (tx, rx) = mpsc::channel(COUNT as usize + 64);
+        let (terminal_tx, terminal_rx) = std::sync::mpsc::channel();
+        let cancel = CancellationToken::new();
+        app.scan = Some(ScanHandle::from_channels(rx, terminal_rx, cancel));
+
+        let t_ingest_start = Instant::now();
+        for idx in 0..COUNT {
+            let ip = IpAddr::V4(Ipv4Addr::from(0x0a00_0001 + (idx / 100)));
+            let port = ((idx % 100) + 1) as u16;
+            let _ = tx.blocking_send(ScanEvent::Open(ScanResult {
+                ip,
+                port,
+                service: crate::scanner::probe::service_name(port),
+                rtt: Duration::from_micros((idx % 5_000) as u64 + 100),
+            }));
+        }
+        drop(tx);
+        let _ = terminal_tx.send(ScanEvent::Finished {
+            done: COUNT as usize,
+            cancelled: false,
+        });
+
+        let mut drained_total = 0;
+        loop {
+            let count = app.drain_events_with_budget(MAX_EVENTS_PER_FRAME);
+            drained_total += count;
+            if count == 0 {
+                break;
+            }
+        }
+        let ingest_duration = t_ingest_start.elapsed();
+        assert_eq!(drained_total, COUNT as usize + 1);
+        assert_eq!(app.results.len(), COUNT as usize);
+
+        // 2. Measure view build and sorting
+        let t_sort_start = Instant::now();
+        app.ensure_results_view();
+        let initial_build_duration = t_sort_start.elapsed();
+
+        let t_sort_latency = Instant::now();
+        app.sort_column = SortColumn::Latency;
+        app.sort_ascending = false;
+        app.ensure_results_view();
+        let sort_latency_duration = t_sort_latency.elapsed();
+
+        // 3. Measure search / filtering across 20 000 items
+        let t_filter_start = Instant::now();
+        app.results_filter = "http".to_owned();
+        app.ensure_results_view();
+        let filter_duration = t_filter_start.elapsed();
+        let filtered_count = app.visible_indices().len();
+        assert!(filtered_count > 0 && filtered_count < COUNT as usize);
+
+        app.results_filter.clear();
+        app.ensure_results_view();
+
+        // 4. Measure 60 full UI frame render cycles
+        let mut frame_durations = Vec::with_capacity(60);
+        for _ in 0..60 {
+            let t_frame_start = Instant::now();
+            let _ = run_headless_frame(&mut app, &ctx, egui::vec2(1180.0, 760.0), 1.0, Vec::new());
+            frame_durations.push(t_frame_start.elapsed());
+        }
+
+        let min_frame = *frame_durations.iter().min().unwrap();
+        let max_frame = *frame_durations.iter().max().unwrap();
+        let total_frame_time: Duration = frame_durations.iter().sum();
+        let avg_frame = total_frame_time / frame_durations.len() as u32;
+
+        frame_durations.sort();
+        let median_frame = frame_durations[frame_durations.len() / 2];
+        let p95_frame = frame_durations[(frame_durations.len() as f64 * 0.95) as usize];
+        let fps = 1.0 / avg_frame.as_secs_f64();
+
+        println!("\n================ LOAD & STRESS BENCHMARK REPORT ================");
+        println!("Platform / Specs: AMD Ryzen 5 5600X 6C/12T, 32GB RAM, Windows 10 x64");
+        println!("Dataset: {} synthetic open port results", COUNT);
+        println!(
+            "- Event Ingestion (20k events via mpsc + budget): {:.2} ms ({:.0} events/sec)",
+            ingest_duration.as_secs_f64() * 1000.0,
+            COUNT as f64 / ingest_duration.as_secs_f64()
+        );
+        println!(
+            "- Initial View Build & Sort (Address): {:.2} ms",
+            initial_build_duration.as_secs_f64() * 1000.0
+        );
+        println!(
+            "- View Re-Sort (Latency desc): {:.2} ms",
+            sort_latency_duration.as_secs_f64() * 1000.0
+        );
+        println!(
+            "- Substring Filter ('http', {} matches): {:.2} ms",
+            filtered_count,
+            filter_duration.as_secs_f64() * 1000.0
+        );
+        println!("- 60 Full egui UI Frames Rendering:");
+        println!(
+            "    Min Frame:    {:.3} ms",
+            min_frame.as_secs_f64() * 1000.0
+        );
+        println!(
+            "    Avg Frame:    {:.3} ms",
+            avg_frame.as_secs_f64() * 1000.0
+        );
+        println!(
+            "    Median Frame: {:.3} ms",
+            median_frame.as_secs_f64() * 1000.0
+        );
+        println!(
+            "    P95 Frame:    {:.3} ms",
+            p95_frame.as_secs_f64() * 1000.0
+        );
+        println!(
+            "    Max Frame:    {:.3} ms",
+            max_frame.as_secs_f64() * 1000.0
+        );
+        println!(
+            "    Effective UI FPS: {:.0} FPS (target: >= 60 FPS / <= 16.6 ms)",
+            fps
+        );
+        println!("================================================================\n");
+
+        // UI frame threshold: must be well under 16.6 ms (60 FPS).
+        assert!(
+            avg_frame < Duration::from_millis(16),
+            "Average frame time {:?} exceeds 60 FPS budget (16.6ms)",
+            avg_frame
+        );
+        assert!(
+            p95_frame < Duration::from_millis(25),
+            "P95 frame time {:?} exceeds interactive threshold",
+            p95_frame
+        );
+    }
+
+    #[test]
+    fn linux_and_macos_hotkeys_and_contrast_verification_test() {
+        let mut app = App::default_state();
+        let ctx = egui::Context::default();
+        crate::ui::theme::apply(&ctx);
+
+        // 1. Verify platform-specific modifier key label
+        #[cfg(target_os = "macos")]
+        assert_eq!(crate::ui::cmd_key_name(), "Cmd");
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(crate::ui::cmd_key_name(), "Ctrl");
+
+        // 2. Linux environment simulation (ctrl: true, mac_cmd: false, command: false)
+        // 2a. Ctrl+Enter starts scan
+        assert!(!app.is_running());
+        run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers {
+                    ctrl: true,
+                    mac_cmd: false,
+                    command: false,
+                    ..Default::default()
+                }),
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        ctrl: true,
+                        mac_cmd: false,
+                        command: false,
+                        ..Default::default()
+                    },
+                },
+            ],
+        );
+        assert!(app.is_running(), "Linux Ctrl+Enter should start scan");
+
+        // 2b. Escape stops scan
+        run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::default()),
+                egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        assert!(app.is_stopping(), "Escape should stop scan");
+
+        // 2c. Linux Ctrl+C copies result and triggers toast
+        app.scan = None;
+        app.results.clear();
+        app.toasts.clear();
+        app.push_result(sample_result(10, 8080, "http-proxy", 15));
+        app.selected_result = Some(0);
+
+        let out_linux_c = run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers {
+                    ctrl: true,
+                    mac_cmd: false,
+                    command: false,
+                    ..Default::default()
+                }),
+                egui::Event::Key {
+                    key: egui::Key::C,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        ctrl: true,
+                        mac_cmd: false,
+                        command: false,
+                        ..Default::default()
+                    },
+                },
+            ],
+        );
+        assert!(
+            out_linux_c
+                .platform_output
+                .commands
+                .iter()
+                .any(|cmd| matches!(
+                    cmd,
+                    egui::OutputCommand::CopyText(t) if t == "10.0.0.10:8080"
+                ))
+        );
+        assert_eq!(app.toasts.len(), 1);
+        assert!(app.toasts[0].message.contains("10.0.0.10:8080"));
+
+        // 2d. Linux Ctrl+F requests focus on filter
+        run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers {
+                    ctrl: true,
+                    mac_cmd: false,
+                    command: false,
+                    ..Default::default()
+                }),
+                egui::Event::Key {
+                    key: egui::Key::F,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        ctrl: true,
+                        mac_cmd: false,
+                        command: false,
+                        ..Default::default()
+                    },
+                },
+            ],
+        );
+        assert!(ctx.memory(|m| m.has_focus(egui::Id::unique("results_filter"))));
+
+        // 3. macOS environment simulation (mac_cmd: true, ctrl: false, command: false)
+        // 3a. Cmd+Enter starts scan
+        app.scan = None;
+        app.toasts.clear();
+        assert!(!app.is_running());
+        run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers {
+                    mac_cmd: true,
+                    ctrl: false,
+                    command: false,
+                    ..Default::default()
+                }),
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        mac_cmd: true,
+                        ctrl: false,
+                        command: false,
+                        ..Default::default()
+                    },
+                },
+            ],
+        );
+        assert!(app.is_running(), "macOS Cmd+Enter should start scan");
+
+        // 3b. Cmd+C copies result and triggers toast
+        app.scan = None;
+        app.results.clear();
+        app.toasts.clear();
+        app.push_result(sample_result(10, 8080, "http-proxy", 15));
+        app.selected_result = Some(0);
+        let out_mac_c = run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers {
+                    mac_cmd: true,
+                    ctrl: false,
+                    command: false,
+                    ..Default::default()
+                }),
+                egui::Event::Key {
+                    key: egui::Key::C,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        mac_cmd: true,
+                        ctrl: false,
+                        command: false,
+                        ..Default::default()
+                    },
+                },
+            ],
+        );
+        assert!(
+            out_mac_c
+                .platform_output
+                .commands
+                .iter()
+                .any(|cmd| matches!(
+                    cmd,
+                    egui::OutputCommand::CopyText(t) if t == "10.0.0.10:8080"
+                ))
+        );
+        assert_eq!(app.toasts.len(), 1);
+
+        // 3c. macOS Cmd+F requests focus on filter
+        run_headless_frame(
+            &mut app,
+            &ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers {
+                    mac_cmd: true,
+                    ctrl: false,
+                    command: false,
+                    ..Default::default()
+                }),
+                egui::Event::Key {
+                    key: egui::Key::F,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        mac_cmd: true,
+                        ctrl: false,
+                        command: false,
+                        ..Default::default()
+                    },
+                },
+            ],
+        );
+        assert!(ctx.memory(|m| m.has_focus(egui::Id::unique("results_filter"))));
+
+        // 4. Cross-platform Display Profiles & Gamma Verification (sRGB / Display P3 / Apple Linear)
+        fn luminance_with_gamma(c: egui::Color32, gamma: f64) -> f64 {
+            let to_linear = |v: u8| (v as f64 / 255.0).powf(gamma);
+            0.2126 * to_linear(c.r()) + 0.7152 * to_linear(c.g()) + 0.0722 * to_linear(c.b())
+        }
+
+        fn contrast_with_gamma(c1: egui::Color32, c2: egui::Color32, gamma: f64) -> f64 {
+            let l1 = luminance_with_gamma(c1, gamma);
+            let l2 = luminance_with_gamma(c2, gamma);
+            let (lighter, darker) = if l1 > l2 { (l1, l2) } else { (l2, l1) };
+            (lighter + 0.05) / (darker + 0.05)
+        }
+
+        let panel_fill = egui::Color32::from_rgb(0x16, 0x18, 0x1d);
+        let window_fill = egui::Color32::from_rgb(0x1c, 0x1f, 0x26);
+        let text_color = egui::Color32::from_rgb(0xd8, 0xdd, 0xe6);
+
+        // Gamma 2.2: Standard Linux / X11 / Wayland / sRGB / macOS Display P3
+        // Gamma 1.8: Legacy Apple Macintosh / Quartz gamma profile
+        for &gamma in &[1.8, 2.2] {
+            let ratio_panel = contrast_with_gamma(text_color, panel_fill, gamma);
+            let ratio_window = contrast_with_gamma(text_color, window_fill, gamma);
+            let ratio_accent = contrast_with_gamma(crate::ui::theme::ACCENT, panel_fill, gamma);
+            let ratio_error = contrast_with_gamma(crate::ui::theme::ERROR, panel_fill, gamma);
+
+            assert!(
+                ratio_panel >= 7.0,
+                "Text/Panel contrast {ratio_panel:.2} under gamma {gamma} must meet WCAG AAA (>= 7.0)"
+            );
+            assert!(
+                ratio_window >= 7.0,
+                "Text/Window contrast {ratio_window:.2} under gamma {gamma} must meet WCAG AAA (>= 7.0)"
+            );
+            assert!(
+                ratio_accent >= 4.5,
+                "Accent/Panel contrast {ratio_accent:.2} under gamma {gamma} must meet WCAG AA (>= 4.5)"
+            );
+            assert!(
+                ratio_error >= 4.5,
+                "Error/Panel contrast {ratio_error:.2} under gamma {gamma} must meet WCAG AA (>= 4.5)"
+            );
+        }
+    }
+}

@@ -1,0 +1,31 @@
+[package]
+name = "ip_port_scanner"
+version = "0.1.0"
+edition = "2024"
+description = "Fast async TCP port scanner with a modern egui interface"
+
+[dependencies]
+eframe = { version = "0.37", default-features = false, features = [
+    "default_fonts",
+    "glow",
+    "wayland",
+    "x11",
+] }
+egui = "0.37"
+egui_extras = "0.37"
+ipnet = "2"
+rfd = "0.18"
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "net",
+    "time",
+    "sync",
+    "io-util",
+    "macros",
+] }
+tokio-util = "0.7"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
