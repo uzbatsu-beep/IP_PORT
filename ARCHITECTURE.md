@@ -178,13 +178,13 @@ IP / PORT Scanner — настольный сканер адресов и пор
 
 ## Непрерывная интеграция, выпуск и платформенная поддержка
 
-- **MSRV (Minimum Supported Rust Version):** зафиксирован на `Rust 1.85.0` (`rust-version = "1.85"` в `Cargo.toml`). Редакция: `edition = "2024"`.
+- **MSRV (Minimum Supported Rust Version):** зафиксирован на `Rust 1.95.0` (`rust-version = "1.95"` в `Cargo.toml`, обусловлен зависимостями экосистемы egui/eframe 0.37). Редакция: `edition = "2024"`.
 - **Автоматический CI пайплайн (`.github/workflows/ci.yml`):**
   - Шаг `Formatting`: запуск `cargo fmt --check` на `ubuntu-latest`.
   - Шаг `Test & Clippy`: матрица по целевым операционным системам (`ubuntu-latest`, `windows-latest`, `macos-latest`).
     На Linux автоматически устанавливаются зависимости `libxkbcommon-dev`, `libwayland-dev`, `libgl1-mesa-dev`, `libx11-dev`, `libxcursor-dev`, `libxi-dev`, `libxrandr-dev`.
     Выполняются `cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets`, а также сборка релизного артефакта `cargo build --release` с выгрузкой в actions artifacts.
-  - Шаг `MSRV`: проверка компиляции `cargo check --all-targets` на строго зафиксированной версии компилятора `dtolnay/rust-toolchain@1.85.0`.
+  - Шаг `MSRV`: проверка компиляции `cargo check --all-targets` на строго зафиксированной версии компилятора `dtolnay/rust-toolchain@1.95.0`.
 - **Автоматический релизный пайплайн (`.github/workflows/release.yml`):**
   - Запускается по тегам `v*.*.*`.
   - Матричная кросс-компиляция под 4 целевые платформы:

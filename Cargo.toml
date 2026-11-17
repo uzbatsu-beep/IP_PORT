@@ -2,7 +2,7 @@
 name = "ip_port_scanner"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 description = "Fast cross-platform async TCP and UDP port scanner with a modern egui interface"
 license = "MIT"
 readme = "README.md"

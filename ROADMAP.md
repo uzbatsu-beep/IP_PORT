@@ -166,7 +166,7 @@
   зафиксировать поддерживаемую версию Rust и системные зависимости.
   (Настроен workflow `.github/workflows/ci.yml`: матрица Windows, Linux, macOS; проверки `cargo fmt --check`,
   `cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets`, сборка release-бинарников с сохранением артефактов;
-  MSRV зафиксирован на Rust 1.85.0 с отдельным шагом проверки).
+  MSRV зафиксирован на Rust 1.95.0 с отдельным шагом проверки).
 - [x] Проверить сборки и GUI на Windows, Linux и macOS, документировать упаковку и установку.
   (Релизная сборка Windows x64 проверена локально: автономный бинарник ~7.45 МБ; настроен workflow `.github/workflows/release.yml`
   с матричной сборкой под 4 архитектуры: Windows x64, Linux x64, macOS Apple Silicon и macOS Intel с упаковкой `.zip`/`.tar.gz`

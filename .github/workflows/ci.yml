@@ -89,7 +89,7 @@ jobs:
           retention-days: 7
 
   msrv:
-    name: Minimum Supported Rust Version (MSRV 1.85.0)
+    name: Minimum Supported Rust Version (MSRV 1.95.0)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -107,7 +107,7 @@ jobs:
             libxi-dev \
             libxrandr-dev
 
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: dtolnay/rust-toolchain@1.95.0
 
       - uses: Swatinem/rust-cache@v2
 

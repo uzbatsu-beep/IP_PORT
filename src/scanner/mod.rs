@@ -508,7 +508,7 @@ where
                 }
                 let outcome_counts = counts.record(&outcome);
                 let completed = outcome_counts.done();
-                if (completed == total || completed % 50 == 0)
+                if (completed == total || completed.is_multiple_of(50))
                     && !send_event(
                         &tx,
                         &cancel,

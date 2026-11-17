@@ -156,6 +156,8 @@ struct ExportTask {
     receiver: std::sync::mpsc::Receiver<(PathBuf, usize, Result<(), String>)>,
 }
 
+pub type ScanSpawner = fn(ScanConfig) -> Result<ScanHandle, String>;
+
 pub struct App {
     pub targets_input: String,
     pub ports_input: String,
@@ -192,6 +194,7 @@ pub struct App {
 
     input_cache: InputCache,
     scan: Option<ScanHandle>,
+    spawner: ScanSpawner,
     export_task: Option<ExportTask>,
     last_export_dir: Option<PathBuf>,
     pub last_export_path: Option<PathBuf>,
@@ -241,11 +244,17 @@ impl App {
             view_rebuilds: 0,
             input_cache,
             scan: None,
+            spawner: scanner::spawn,
             export_task: None,
             last_export_dir: None,
             last_export_path: None,
             scroll_to_selected: false,
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn set_spawner(&mut self, spawner: ScanSpawner) {
+        self.spawner = spawner;
     }
 
     pub fn is_running(&self) -> bool {
@@ -271,7 +280,7 @@ impl App {
     }
 
     pub fn start_scan(&mut self) {
-        self.start_scan_with(scanner::spawn);
+        self.start_scan_with(self.spawner);
     }
 
     pub fn start_scan_with<F>(&mut self, spawn_fn: F)
@@ -641,7 +650,7 @@ impl App {
         }
     }
 
-    fn clear_results_storage(&mut self) {
+    pub(crate) fn clear_results_storage(&mut self) {
         self.results.clear();
         self.rows.clear();
         self.visible_indices.clear();
@@ -1058,6 +1067,13 @@ mod tests {
         (tx, terminal_tx, cancel)
     }
 
+    fn mock_infinite_scan(_config: ScanConfig) -> Result<ScanHandle, String> {
+        let (_tx, rx) = mpsc::channel(64);
+        let (_terminal_tx, terminal_rx) = std::sync::mpsc::channel();
+        let cancel = CancellationToken::new();
+        Ok(ScanHandle::from_channels(rx, terminal_rx, cancel))
+    }
+
     fn sample_result(host: u8, port: u16, service: &'static str, rtt_ms: u64) -> ScanResult {
         ScanResult::new(
             IpAddr::V4(Ipv4Addr::new(10, 0, 0, host)),
@@ -1406,6 +1422,7 @@ mod tests {
     #[test]
     fn keyboard_navigation_and_shortcuts_test() {
         let mut app = App::default_state();
+        app.set_spawner(mock_infinite_scan);
         let ctx = egui::Context::default();
         crate::ui::theme::apply(&ctx);
 
@@ -1458,7 +1475,7 @@ mod tests {
 
         // 3. Ctrl+C with selected row copies selected IP:Port
         app.scan = None;
-        app.results.clear();
+        app.clear_results_storage();
         app.push_result(sample_result(1, 80, "http", 10));
         app.push_result(sample_result(2, 443, "https", 25));
         app.selected_result = Some(0);
@@ -1967,6 +1984,7 @@ mod tests {
     #[test]
     fn linux_and_macos_hotkeys_and_contrast_verification_test() {
         let mut app = App::default_state();
+        app.set_spawner(mock_infinite_scan);
         let ctx = egui::Context::default();
         crate::ui::theme::apply(&ctx);
 
@@ -2028,7 +2046,7 @@ mod tests {
 
         // 2c. Linux Ctrl+C copies result and triggers toast
         app.scan = None;
-        app.results.clear();
+        app.clear_results_storage();
         app.toasts.clear();
         app.push_result(sample_result(10, 8080, "http-proxy", 15));
         app.selected_result = Some(0);
@@ -2136,7 +2154,7 @@ mod tests {
 
         // 3b. Cmd+C copies result and triggers toast
         app.scan = None;
-        app.results.clear();
+        app.clear_results_storage();
         app.toasts.clear();
         app.push_result(sample_result(10, 8080, "http-proxy", 15));
         app.selected_result = Some(0);
