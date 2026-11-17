@@ -51,6 +51,24 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 .weak()
                 .small(),
         );
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let is_grouped = app.view_mode == crate::app::ResultsViewMode::GroupedByHost;
+            if ui
+                .selectable_label(is_grouped, "🗂 By Host")
+                .on_hover_text("Group results by host in a collapsible tree")
+                .clicked()
+            {
+                app.view_mode = crate::app::ResultsViewMode::GroupedByHost;
+            }
+            if ui
+                .selectable_label(!is_grouped, "☰ Flat")
+                .on_hover_text("Show all ports in a flat table")
+                .clicked()
+            {
+                app.view_mode = crate::app::ResultsViewMode::Flat;
+            }
+        });
     });
     ui.separator();
 
@@ -87,6 +105,18 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         return;
     }
 
+    if app.view_mode == crate::app::ResultsViewMode::GroupedByHost {
+        render_grouped_by_host(app, ui);
+    } else {
+        render_flat_table(app, ui);
+    }
+
+    if let Some(selected_idx) = app.selected_result {
+        crate::ui::quick_actions::show_inspector_toolbar(app, selected_idx, ui);
+    }
+}
+
+fn render_flat_table(app: &mut App, ui: &mut Ui) {
     let mut sort_column = app.sort_column;
     let mut sort_ascending = app.sort_ascending;
     let headers = ["Address", "Port", "Service", "Latency"];
@@ -237,12 +267,106 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             });
     });
 
-    if let Some(selected_idx) = app.selected_result {
-        crate::ui::quick_actions::show_inspector_toolbar(app, selected_idx, ui);
-    }
-
     if app.sort_column != sort_column || app.sort_ascending != sort_ascending {
         app.sort_column = sort_column;
         app.sort_ascending = sort_ascending;
     }
+}
+
+fn render_grouped_by_host(app: &mut App, ui: &mut Ui) {
+    let host_count = app.host_groups().len();
+    let total_ports: usize = app.host_groups().iter().map(|h| h.ports_count).sum();
+
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(format!(
+                "{host_count} host{}, {total_ports} open port{}",
+                if host_count == 1 { "" } else { "s" },
+                if total_ports == 1 { "" } else { "s" }
+            ))
+            .small()
+            .weak(),
+        );
+    });
+    ui.add_space(4.0);
+
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            let host_groups = app.host_groups().to_vec();
+            for group in &host_groups {
+                let rtt_ms = group.min_rtt.as_secs_f64() * 1000.0;
+                let header_title = format!(
+                    "🖥  {} — {} port{} ({}) · {:.2} ms",
+                    group.ip_text,
+                    group.ports_count,
+                    if group.ports_count == 1 { "" } else { "s" },
+                    group.services_summary,
+                    rtt_ms
+                );
+
+                egui::CollapsingHeader::new(RichText::new(header_title).strong())
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            if ui.small_button("📋 Copy IP").clicked() {
+                                app.copy_text_with_toast(
+                                    ui.ctx(),
+                                    group.ip_text.clone(),
+                                    format!("Copied {}", group.ip_text),
+                                );
+                            }
+                            if ui.small_button("🔍 Filter").clicked() {
+                                app.results_filter = group.ip_text.clone();
+                            }
+                            if ui.small_button("🎯 Scan Host").clicked() {
+                                app.targets_input = group.ip_text.clone();
+                                app.ports_input = "1-1024".to_owned();
+                                app.show_toast(format!(
+                                    "Targets set to {} (ports 1-1024)",
+                                    group.ip_text
+                                ));
+                            }
+                        });
+
+                        ui.add_space(2.0);
+
+                        for &entry_idx in &group.indices {
+                            let entry = app.row(entry_idx).clone();
+                            let is_selected = app.selected_result == Some(entry_idx);
+
+                            let banner_suffix = if let Some(b) = &entry.raw.banner {
+                                format!("  —  {b}")
+                            } else {
+                                String::new()
+                            };
+
+                            let port_label = format!(
+                                "Port {}/{} · {} · {} · {}{}",
+                                entry.port_text,
+                                entry.protocol_text,
+                                entry.raw.service,
+                                entry.state_text,
+                                entry.latency_text,
+                                banner_suffix
+                            );
+
+                            let response = ui.selectable_label(is_selected, port_label);
+                            if response.clicked() {
+                                app.selected_result = Some(entry_idx);
+                            }
+                            response
+                                .on_hover_text(
+                                    "Right-click for quick actions, Enter to open in browser",
+                                )
+                                .context_menu(|ui| {
+                                    crate::ui::quick_actions::show_row_context_menu(
+                                        app, &entry, ui,
+                                    );
+                                });
+                        }
+                    });
+                ui.add_space(4.0);
+            }
+        });
 }

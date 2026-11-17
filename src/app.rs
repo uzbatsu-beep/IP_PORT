@@ -22,6 +22,64 @@ pub enum SortColumn {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ResultsViewMode {
+    #[default]
+    Flat,
+    GroupedByHost,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HostGroup {
+    pub ip: IpAddr,
+    pub ip_text: String,
+    pub indices: Vec<usize>,
+    pub ports_count: usize,
+    pub services_summary: String,
+    pub min_rtt: Duration,
+}
+
+impl HostGroup {
+    pub fn build(ip: IpAddr, indices: Vec<usize>, rows: &[ResultRow]) -> Self {
+        let ip_text = ip.to_string();
+        let ports_count = indices.len();
+        let min_rtt = indices
+            .iter()
+            .map(|&idx| rows[idx].raw.rtt)
+            .min()
+            .unwrap_or_default();
+
+        let mut distinct_services: Vec<&str> = Vec::new();
+        for &idx in &indices {
+            let svc = rows[idx].raw.service;
+            if svc != "unknown" && !distinct_services.contains(&svc) {
+                distinct_services.push(svc);
+            }
+        }
+
+        let services_summary = if distinct_services.is_empty() {
+            "unknown".to_owned()
+        } else if distinct_services.len() <= 3 {
+            distinct_services.join(", ")
+        } else {
+            format!(
+                "{}, +{} more",
+                distinct_services[..3].join(", "),
+                distinct_services.len() - 3
+            )
+        };
+
+        Self {
+            ip,
+            ip_text,
+            indices,
+            ports_count,
+            services_summary,
+            min_rtt,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum StatusLevel {
     #[default]
     Idle,
@@ -207,6 +265,7 @@ pub struct App {
     pub sort_column: SortColumn,
     pub sort_ascending: bool,
     pub selected_result: Option<usize>,
+    pub view_mode: ResultsViewMode,
 
     pub target_count: usize,
     pub port_count: usize,
@@ -219,6 +278,7 @@ pub struct App {
 
     rows: Vec<ResultRow>,
     visible_indices: Vec<usize>,
+    host_groups: Vec<HostGroup>,
     cached_filter: String,
     cached_sort_column: SortColumn,
     cached_sort_ascending: bool,
@@ -263,6 +323,7 @@ impl App {
             sort_column: SortColumn::Address,
             sort_ascending: true,
             selected_result: None,
+            view_mode: ResultsViewMode::Flat,
             target_count: 0,
             port_count: 0,
             total_probes: 0,
@@ -273,6 +334,7 @@ impl App {
             scan_started_at: None,
             rows: Vec::new(),
             visible_indices: Vec::new(),
+            host_groups: Vec::new(),
             cached_filter: String::new(),
             cached_sort_column: SortColumn::Address,
             cached_sort_ascending: true,
@@ -492,10 +554,28 @@ impl App {
         self.cached_sort_ascending = self.sort_ascending;
         self.view_dirty = false;
         self.view_rebuilds += 1;
+
+        let mut groups_map: Vec<(IpAddr, Vec<usize>)> = Vec::new();
+        for &idx in &self.visible_indices {
+            let ip = self.rows[idx].raw.ip;
+            if let Some((_, list)) = groups_map.iter_mut().find(|(group_ip, _)| *group_ip == ip) {
+                list.push(idx);
+            } else {
+                groups_map.push((ip, vec![idx]));
+            }
+        }
+        self.host_groups = groups_map
+            .into_iter()
+            .map(|(ip, indices)| HostGroup::build(ip, indices, &self.rows))
+            .collect();
     }
 
     pub fn visible_indices(&self) -> &[usize] {
         &self.visible_indices
+    }
+
+    pub fn host_groups(&self) -> &[HostGroup] {
+        &self.host_groups
     }
 
     pub fn row(&self, index: usize) -> &ResultRow {
@@ -723,6 +803,7 @@ impl App {
         self.results.clear();
         self.rows.clear();
         self.visible_indices.clear();
+        self.host_groups.clear();
         self.selected_result = None;
         self.view_dirty = false;
         self.dropped_open_results = 0;
@@ -1326,6 +1407,53 @@ mod tests {
         assert_eq!(app.view_rebuilds(), 3);
         let first = app.row(app.visible_indices()[0]).raw.port;
         assert_eq!(first, 443);
+    }
+
+    #[test]
+    fn host_groups_aggregation_and_view_mode_toggle() {
+        let mut app = App::default_state();
+        assert_eq!(app.view_mode, ResultsViewMode::Flat);
+
+        // Host 1: 10.0.0.1 with ports 80, 443, 8080
+        app.push_result(sample_result(1, 80, "http", 10));
+        app.push_result(sample_result(1, 443, "https", 15));
+        app.push_result(sample_result(1, 8080, "http-alt", 20));
+
+        // Host 2: 10.0.0.2 with port 22
+        app.push_result(sample_result(2, 22, "ssh", 5));
+
+        app.ensure_results_view();
+        assert_eq!(app.host_groups().len(), 2);
+
+        let g0 = &app.host_groups()[0];
+        assert_eq!(g0.ip_text, "10.0.0.1");
+        assert_eq!(g0.ports_count, 3);
+        assert_eq!(g0.min_rtt, Duration::from_millis(10));
+        assert!(g0.services_summary.contains("http"));
+
+        let g1 = &app.host_groups()[1];
+        assert_eq!(g1.ip_text, "10.0.0.2");
+        assert_eq!(g1.ports_count, 1);
+        assert_eq!(g1.min_rtt, Duration::from_millis(5));
+        assert_eq!(g1.services_summary, "ssh");
+
+        // Filter by 10.0.0.2
+        app.results_filter = "10.0.0.2".to_owned();
+        app.ensure_results_view();
+        assert_eq!(app.host_groups().len(), 1);
+        assert_eq!(app.host_groups()[0].ip_text, "10.0.0.2");
+
+        // Switch to GroupedByHost
+        app.results_filter.clear();
+        app.view_mode = ResultsViewMode::GroupedByHost;
+        app.ensure_results_view();
+
+        // Render headless frame in GroupedByHost mode
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.update_ui(ui);
+        });
+        output.textures_delta.clear();
     }
 
     #[test]
