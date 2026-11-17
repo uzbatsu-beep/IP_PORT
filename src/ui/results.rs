@@ -54,6 +54,19 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     });
     ui.separator();
 
+    if let Some(stats) = crate::ui::rtt_view::calculate_rtt_stats(&app.results) {
+        let header_title = format!(
+            "Latency distribution — Min: {:.2} ms | Avg: {:.2} ms | Median: {:.2} ms | Max: {:.2} ms",
+            stats.min_ms, stats.avg_ms, stats.median_ms, stats.max_ms
+        );
+        egui::CollapsingHeader::new(RichText::new(header_title).small().strong())
+            .default_open(true)
+            .show(ui, |ui| {
+                crate::ui::rtt_view::show_rtt_panel(app, &stats, ui);
+            });
+        ui.add_space(4.0);
+    }
+
     app.ensure_results_view();
     if app.visible_indices().is_empty() {
         ui.add_space(40.0);

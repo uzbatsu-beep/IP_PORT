@@ -1,4 +1,5 @@
 pub mod results;
+pub mod rtt_view;
 pub mod sidebar;
 pub mod theme;
 
