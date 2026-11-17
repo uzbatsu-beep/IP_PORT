@@ -1,0 +1,68 @@
+name: Сообщение об ошибке (Bug Report)
+description: Сообщить о некорректном поведении или сбое в работе IP / PORT Scanner
+title: "[BUG]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо, что помогаете улучшать **IP / PORT Scanner**!
+        Пожалуйста, заполните форму ниже как можно подробнее.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Описание ошибки
+      description: Чёткое и краткое описание проблемы.
+      placeholder: При сканировании подсети 192.168.1.0/24...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Шаги для воспроизведения
+      description: Пошаговая последовательность действий, приводящая к ошибке.
+      placeholder: |
+        1. Ввести в поле целей '...'
+        2. Выбрать порт '...'
+        3. Нажать кнопку 'Start scan'
+        4. Наблюдать ошибку...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ожидаемое поведение
+      description: Что должно было произойти согласно вашим ожиданиям.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Операционная система
+      options:
+        - Windows 11 / 10 (x64)
+        - Linux (Ubuntu / Debian / Fedora / Arch)
+        - macOS (Apple Silicon / Intel)
+        - Другая
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Версия приложения
+      description: Версия IP / PORT Scanner (например, v0.3.0 или хэш коммита).
+      placeholder: v0.3.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Логи / Сообщения об ошибках
+      description: Вставьте вывод консоли, текст тоста или диагностические сообщения (если применимо).
+      render: shell

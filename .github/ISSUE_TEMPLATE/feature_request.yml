@@ -1,0 +1,42 @@
+name: Предложение функции (Feature Request)
+description: Предложить новую идею, улучшение интерфейса или сетевого движка
+title: "[FEATURE]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Есть идея, как сделать **IP / PORT Scanner** ещё лучше? Мы рады вашим предложениям!
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую проблему решает предложение?
+      description: Опишите текущее затруднение или ограничение, с которым вы столкнулись.
+      placeholder: Мне часто требуется... но сейчас это неудобно, потому что...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Предлагаемое решение
+      description: Подробно опишите, как должна работать новая функциональность.
+      placeholder: Было бы здорово добавить кнопку / опцию, которая...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Рассматриваемые альтернативы
+      description: Рассматривали ли вы другие подходы или аналогичные инструменты?
+      placeholder: В Nmap / Advanced Port Scanner это реализовано через...
+    validations:
+      false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Дополнительный контекст
+      description: Скриншоты, макеты, ссылки на документацию или RFC.
