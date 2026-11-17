@@ -7,7 +7,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.heading(RichText::new("Results").strong());
         ui.label(
-            RichText::new(format!("{} open", app.results.len()))
+            RichText::new(format!("{} stored", app.results.len()))
                 .weak()
                 .small(),
         );
@@ -152,18 +152,66 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     }
                     row.col(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                            ui.label(RichText::new(&entry.port_text).monospace());
+                            let proto_suffix = match entry.raw.protocol {
+                                crate::scanner::ScanProtocol::Tcp => "",
+                                crate::scanner::ScanProtocol::Udp => "/udp",
+                            };
+                            ui.label(
+                                RichText::new(format!("{}{proto_suffix}", entry.port_text))
+                                    .monospace(),
+                            );
                         });
                     });
-                    row.col(|ui| {
-                        ui.label(entry.raw.service);
+                    let (_, service_response) = row.col(|ui| {
+                        if entry.raw.state == crate::scanner::PortState::OpenFiltered {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("?").color(crate::ui::theme::WARNING).small(),
+                                );
+                                ui.label(
+                                    RichText::new(format!("{} (open|filtered)", entry.raw.service))
+                                        .color(crate::ui::theme::WARNING),
+                                );
+                            });
+                        } else if entry.raw.service_verified {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("✔").color(crate::ui::theme::SUCCESS).small(),
+                                );
+                                ui.label(RichText::new(entry.raw.service).strong());
+                            });
+                        } else {
+                            ui.label(entry.raw.service);
+                        }
                     });
+                    if entry.raw.state == crate::scanner::PortState::OpenFiltered {
+                        service_response.on_hover_text(
+                            "UDP Open|Filtered: no response received within timeout.\nPort may be filtered by firewall or service is silent.",
+                        );
+                    } else if entry.raw.service_verified {
+                        let hint = if let Some(banner) = &entry.raw.banner {
+                            format!("Service confirmed by banner:\n{banner}")
+                        } else {
+                            "Service confirmed by response datagram".to_owned()
+                        };
+                        service_response.on_hover_text(hint);
+                    } else if let Some(banner) = &entry.raw.banner {
+                        service_response.on_hover_text(format!(
+                            "Port-based guess (banner unconfirmed):\n{banner}"
+                        ));
+                    } else {
+                        service_response.on_hover_text("Port-based guess (no banner confirmed)");
+                    }
                     let (_, latency_response) = row.col(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                             ui.label(RichText::new(&entry.latency_text).monospace());
                         });
                     });
-                    latency_response.on_hover_text("TCP connect time, not ICMP ping");
+                    let latency_hint = match entry.raw.protocol {
+                        crate::scanner::ScanProtocol::Tcp => "TCP connect time, not ICMP ping",
+                        crate::scanner::ScanProtocol::Udp => "UDP round-trip time",
+                    };
+                    latency_response.on_hover_text(latency_hint);
                     if row.response().clicked() || row.response().secondary_clicked() {
                         app.selected_result = Some(entry_idx);
                     }
@@ -171,7 +219,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         .on_hover_text("Right-click for quick actions")
                         .context_menu(|ui| {
                             let cmd = crate::ui::cmd_key_name();
-                            if ui.button(format!("Copy IP:Port      ({cmd}+C)")).clicked() {
+                            let proto = entry.raw.protocol.as_str();
+                            if ui
+                                .button(format!("Copy IP:Port ({proto})      ({cmd}+C)"))
+                                .clicked()
+                            {
                                 let text = format!("{}:{}", entry.ip_text, entry.port_text);
                                 app.copy_text_with_toast(
                                     ui.ctx(),
@@ -189,14 +241,38 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                                 );
                                 ui.close();
                             }
-                            if ui.button("Copy row").clicked() {
-                                let text = format!(
-                                    "{}\t{}\t{}\t{}",
-                                    entry.ip_text,
-                                    entry.port_text,
-                                    entry.raw.service,
-                                    entry.latency_text
+                            if let Some(banner) = &entry.raw.banner
+                                && ui.button("Copy banner").clicked()
+                            {
+                                app.copy_text_with_toast(
+                                    ui.ctx(),
+                                    banner.clone(),
+                                    format!(
+                                        "Copied banner for {}:{}",
+                                        entry.ip_text, entry.port_text
+                                    ),
                                 );
+                                ui.close();
+                            }
+                            if ui.button("Copy row").clicked() {
+                                let text = if let Some(banner) = &entry.raw.banner {
+                                    format!(
+                                        "{}\t{}\t{}\t{}\t{}",
+                                        entry.ip_text,
+                                        entry.port_text,
+                                        entry.raw.service,
+                                        entry.latency_text,
+                                        banner
+                                    )
+                                } else {
+                                    format!(
+                                        "{}\t{}\t{}\t{}",
+                                        entry.ip_text,
+                                        entry.port_text,
+                                        entry.raw.service,
+                                        entry.latency_text
+                                    )
+                                };
                                 app.copy_text_with_toast(
                                     ui.ctx(),
                                     text,

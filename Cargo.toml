@@ -2,7 +2,12 @@
 name = "ip_port_scanner"
 version = "0.1.0"
 edition = "2024"
-description = "Fast async TCP port scanner with a modern egui interface"
+rust-version = "1.85"
+description = "Fast cross-platform async TCP and UDP port scanner with a modern egui interface"
+license = "MIT"
+readme = "README.md"
+keywords = ["port-scanner", "network", "tcp", "udp", "egui"]
+categories = ["network-programming", "gui"]
 
 [dependencies]
 eframe = { version = "0.37", default-features = false, features = [
@@ -15,6 +20,8 @@ egui = "0.37"
 egui_extras = "0.37"
 ipnet = "2"
 rfd = "0.18"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 tokio = { version = "1", features = [
     "rt-multi-thread",
     "net",

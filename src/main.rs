@@ -2,6 +2,7 @@
 
 mod app;
 mod export;
+mod profile;
 mod scanner;
 mod ui;
 

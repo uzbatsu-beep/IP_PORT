@@ -1,13 +1,15 @@
-use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::scanner::targets;
-use crate::scanner::{self, ScanConfig, ScanEvent, ScanHandle, ScanResult};
+use crate::scanner::{
+    self, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
+};
 use crate::ui;
 
 /// Максимальное число событий сканера, обрабатываемых за один кадр UI.
 pub const MAX_EVENTS_PER_FRAME: usize = 1024;
+pub const MAX_STORED_RESULTS: usize = 100_000;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SortColumn {
@@ -31,6 +33,7 @@ pub enum StatusLevel {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ScopePreview {
     pub targets: usize,
+    pub hostnames: usize,
     pub ports: usize,
     pub probes: usize,
 }
@@ -40,6 +43,8 @@ pub struct ResultRow {
     pub raw: ScanResult,
     pub ip_text: String,
     pub port_text: String,
+    pub protocol_text: &'static str,
+    pub state_text: &'static str,
     pub latency_text: String,
 }
 
@@ -47,11 +52,15 @@ impl ResultRow {
     fn from_result(raw: ScanResult) -> Self {
         let ip_text = raw.ip.to_string();
         let port_text = raw.port.to_string();
+        let protocol_text = raw.protocol.as_str();
+        let state_text = raw.state.as_str();
         let latency_text = format!("{:.2} ms", raw.rtt.as_secs_f64() * 1000.0);
         Self {
             raw,
             ip_text,
             port_text,
+            protocol_text,
+            state_text,
             latency_text,
         }
     }
@@ -61,12 +70,19 @@ impl ResultRow {
             || contains_ascii_case_insensitive(&self.ip_text, query_lower)
             || self.port_text.contains(query_lower)
             || contains_ascii_case_insensitive(self.raw.service, query_lower)
+            || contains_ascii_case_insensitive(self.protocol_text, query_lower)
+            || contains_ascii_case_insensitive(self.state_text, query_lower)
+            || self
+                .raw
+                .banner
+                .as_ref()
+                .is_some_and(|banner| contains_ascii_case_insensitive(banner, query_lower))
     }
 }
 
 struct InputCache {
     targets_raw: String,
-    targets: Result<Vec<IpAddr>, String>,
+    targets: Result<crate::scanner::TargetList, String>,
     ports_raw: String,
     ports: Result<Vec<u16>, String>,
     preview: Result<ScopePreview, String>,
@@ -106,11 +122,11 @@ impl InputCache {
     }
 
     fn compute_preview(
-        targets: &Result<Vec<IpAddr>, String>,
+        targets: &Result<crate::scanner::TargetList, String>,
         ports: &Result<Vec<u16>, String>,
     ) -> Result<ScopePreview, String> {
-        let targets_len = match targets {
-            Ok(list) => list.len(),
+        let (targets_len, hostnames_len) = match targets {
+            Ok(list) => (list.estimated_count(), list.hostnames.len()),
             Err(err) => return Err(format!("Targets: {err}")),
         };
         let ports_len = match ports {
@@ -122,6 +138,7 @@ impl InputCache {
             .ok_or_else(|| "Scan scope is too large for this platform".to_owned())?;
         Ok(ScopePreview {
             targets: targets_len,
+            hostnames: hostnames_len,
             ports: ports_len,
             probes,
         })
@@ -135,11 +152,18 @@ pub struct Toast {
     pub duration: Duration,
 }
 
+struct ExportTask {
+    receiver: std::sync::mpsc::Receiver<(PathBuf, usize, Result<(), String>)>,
+}
+
 pub struct App {
     pub targets_input: String,
     pub ports_input: String,
     pub timeout_ms: u64,
     pub concurrency: usize,
+    pub banner_grabbing: bool,
+    pub banner_timeout_ms: u64,
+    pub protocol: ScanProtocol,
 
     pub status: String,
     pub status_level: StatusLevel,
@@ -153,6 +177,8 @@ pub struct App {
     pub port_count: usize,
     pub total_probes: usize,
     pub done_probes: usize,
+    pub probe_counts: ProbeCounts,
+    pub dropped_open_results: usize,
     pub toasts: Vec<Toast>,
     scan_started_at: Option<Instant>,
 
@@ -166,6 +192,7 @@ pub struct App {
 
     input_cache: InputCache,
     scan: Option<ScanHandle>,
+    export_task: Option<ExportTask>,
     last_export_dir: Option<PathBuf>,
     pub last_export_path: Option<PathBuf>,
     pub scroll_to_selected: bool,
@@ -187,6 +214,9 @@ impl App {
             ports_input,
             timeout_ms: 800,
             concurrency: 256,
+            banner_grabbing: false,
+            banner_timeout_ms: 1000,
+            protocol: ScanProtocol::Tcp,
             status: String::new(),
             status_level: StatusLevel::Idle,
             results: Vec::new(),
@@ -198,6 +228,8 @@ impl App {
             port_count: 0,
             total_probes: 0,
             done_probes: 0,
+            probe_counts: ProbeCounts::default(),
+            dropped_open_results: 0,
             toasts: Vec::new(),
             scan_started_at: None,
             rows: Vec::new(),
@@ -209,6 +241,7 @@ impl App {
             view_rebuilds: 0,
             input_cache,
             scan: None,
+            export_task: None,
             last_export_dir: None,
             last_export_path: None,
             scroll_to_selected: false,
@@ -278,6 +311,9 @@ impl App {
             ports,
             timeout: Duration::from_millis(self.timeout_ms),
             concurrency: self.concurrency,
+            banner_grabbing: self.banner_grabbing,
+            banner_timeout: Duration::from_millis(self.banner_timeout_ms),
+            protocol: self.protocol,
         };
         let handle = match spawn_fn(config) {
             Ok(handle) => handle,
@@ -293,6 +329,8 @@ impl App {
         self.port_count = preview.ports;
         self.total_probes = preview.probes;
         self.done_probes = 0;
+        self.probe_counts = ProbeCounts::default();
+        self.dropped_open_results = 0;
         self.scan_started_at = Some(Instant::now());
         self.set_status(
             StatusLevel::Running,
@@ -331,6 +369,10 @@ impl App {
     }
 
     pub fn push_result(&mut self, result: ScanResult) {
+        if self.results.len() >= MAX_STORED_RESULTS {
+            self.dropped_open_results += 1;
+            return;
+        }
         self.rows.push(ResultRow::from_result(result.clone()));
         self.results.push(result);
         self.view_dirty = true;
@@ -444,6 +486,10 @@ impl App {
     }
 
     fn export(&mut self, extension: &str) {
+        if self.export_task.is_some() {
+            return;
+        }
+
         let file_name = crate::export::default_export_filename(extension);
         let mut dialog = rfd::FileDialog::new()
             .set_file_name(&file_name)
@@ -456,36 +502,142 @@ impl App {
             return;
         };
         self.last_export_dir = path.parent().map(PathBuf::from);
-        self.last_export_path = Some(path.clone());
 
-        let snapshot_count = self.results.len();
-        let outcome = match extension {
-            "csv" => crate::export::save_csv(&path, &self.results),
-            _ => crate::export::save_json(&path, &self.results),
-        };
+        let snapshot = self.results.clone();
+        let snapshot_count = snapshot.len();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let path_for_task = path.clone();
+        let extension = extension.to_owned();
+        let task = std::thread::Builder::new()
+            .name("export-writer".to_owned())
+            .spawn(move || {
+                let result = match extension.as_str() {
+                    "csv" => crate::export::save_csv(&path_for_task, &snapshot),
+                    _ => crate::export::save_json(&path_for_task, &snapshot),
+                }
+                .map_err(|err| err.to_string());
+                let _ = sender.send((path_for_task, snapshot_count, result));
+            });
 
+        match task {
+            Ok(_) => {
+                self.export_task = Some(ExportTask { receiver });
+                if !self.is_running() {
+                    self.set_status(StatusLevel::Running, "Exporting results...".to_owned());
+                }
+            }
+            Err(err) => {
+                self.set_status(StatusLevel::Error, format!("Export failed: {err}"));
+            }
+        }
+    }
+
+    fn poll_export_task(&mut self, ctx: &egui::Context) {
+        let outcome = self
+            .export_task
+            .as_ref()
+            .map(|task| task.receiver.try_recv());
         match outcome {
+            Some(Ok((path, count, result))) => {
+                self.export_task = None;
+                match result {
+                    Ok(()) => {
+                        self.last_export_path = Some(path.clone());
+                        let file_name = path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("export file");
+                        self.show_toast(format!("Exported {count} results to {file_name}"));
+                        let level = if self.is_stopping() {
+                            StatusLevel::Stopping
+                        } else if self.is_running() {
+                            StatusLevel::Running
+                        } else {
+                            StatusLevel::Success
+                        };
+                        self.set_status(
+                            level,
+                            format!("Saved {count} results to {}", path.display()),
+                        );
+                    }
+                    Err(err) => self.report_export_failure(err),
+                }
+            }
+            Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
+                self.export_task = None;
+                self.report_export_failure("Export worker stopped unexpectedly".to_owned());
+            }
+            Some(Err(std::sync::mpsc::TryRecvError::Empty)) => {
+                ctx.request_repaint_after(Duration::from_millis(50));
+            }
+            None => {}
+        }
+    }
+
+    fn report_export_failure(&mut self, error: String) {
+        if self.is_running() {
+            self.show_toast(format!("Export failed: {error}"));
+        } else {
+            self.set_status(StatusLevel::Error, format!("Export failed: {error}"));
+        }
+    }
+
+    pub fn is_exporting(&self) -> bool {
+        self.export_task.is_some()
+    }
+
+    pub fn save_profile(&mut self, path: &std::path::Path) {
+        let profile = crate::profile::ScanProfile::new(
+            self.targets_input.clone(),
+            self.ports_input.clone(),
+            self.timeout_ms,
+            self.concurrency,
+            self.banner_grabbing,
+            self.banner_timeout_ms,
+            self.protocol,
+        );
+        match crate::profile::save(path, &profile) {
             Ok(()) => {
-                let level = if self.is_stopping() {
-                    StatusLevel::Stopping
-                } else if self.is_running() {
-                    StatusLevel::Running
-                } else {
-                    StatusLevel::Success
-                };
-                self.set_status(
-                    level,
-                    format!("Saved {snapshot_count} results to {}", path.display()),
-                );
-                let saved_file_name = path
+                let file_name = path
                     .file_name()
                     .and_then(|n| n.to_str())
-                    .unwrap_or(&file_name);
-                self.show_toast(format!(
-                    "Exported {snapshot_count} results to {saved_file_name}"
-                ));
+                    .unwrap_or("profile.json");
+                self.show_toast(format!("Saved profile {file_name}"));
+                self.set_status(
+                    StatusLevel::Success,
+                    format!("Saved profile to {}", path.display()),
+                );
             }
-            Err(err) => self.set_status(StatusLevel::Error, format!("Export failed: {err}")),
+            Err(error) => {
+                self.set_status(StatusLevel::Error, format!("Profile save failed: {error}"))
+            }
+        }
+    }
+
+    pub fn load_profile(&mut self, path: &std::path::Path) {
+        match crate::profile::load(path) {
+            Ok(profile) => {
+                self.targets_input = profile.targets;
+                self.ports_input = profile.ports;
+                self.timeout_ms = profile.timeout_ms;
+                self.concurrency = profile.concurrency;
+                self.banner_grabbing = profile.banner_grabbing;
+                self.banner_timeout_ms = profile.banner_timeout_ms;
+                self.protocol = profile.protocol;
+                self.input_cache = InputCache::new(&self.targets_input, &self.ports_input);
+                let file_name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("profile.json");
+                self.show_toast(format!("Loaded profile {file_name}"));
+                self.set_status(
+                    StatusLevel::Success,
+                    format!("Loaded profile from {}", path.display()),
+                );
+            }
+            Err(error) => {
+                self.set_status(StatusLevel::Error, format!("Profile load failed: {error}"));
+            }
         }
     }
 
@@ -495,6 +647,7 @@ impl App {
         self.visible_indices.clear();
         self.selected_result = None;
         self.view_dirty = false;
+        self.dropped_open_results = 0;
     }
 
     pub fn set_status(&mut self, level: StatusLevel, status: String) {
@@ -608,12 +761,21 @@ impl App {
                         self.done_probes = 0;
                     }
                     ScanEvent::Open(result) => pending_open.push(result),
-                    ScanEvent::Progress { done, total } => {
+                    ScanEvent::Progress {
+                        done,
+                        total,
+                        counts,
+                    } => {
                         self.done_probes = self.done_probes.max(done);
                         self.total_probes = total;
+                        self.probe_counts = self.probe_counts.componentwise_max(counts);
                     }
-                    ScanEvent::Finished { done, cancelled } => {
-                        finished_state = Some((done, cancelled));
+                    ScanEvent::Finished {
+                        done,
+                        cancelled,
+                        counts,
+                    } => {
+                        finished_state = Some((done, cancelled, counts));
                         finished = true;
                         break;
                     }
@@ -630,31 +792,46 @@ impl App {
             self.push_result(result);
         }
 
-        if let Some((done, cancelled)) = finished_state {
+        if let Some((done, cancelled, counts)) = finished_state {
             self.done_probes = self.done_probes.max(done);
+            self.probe_counts = self.probe_counts.componentwise_max(counts);
             let elapsed = self
                 .scan_started_at
                 .take()
                 .map(|started_at| started_at.elapsed().as_secs_f64())
                 .unwrap_or_default();
+            let stored_note = if self.dropped_open_results > 0 {
+                format!(
+                    " · {} open results not stored (limit)",
+                    self.dropped_open_results
+                )
+            } else {
+                String::new()
+            };
             if cancelled {
                 self.set_status(
                     StatusLevel::Idle,
                     format!(
-                        "Cancelled after {} probes in {:.1}s, {} open ports",
+                        "Cancelled after {} probes in {:.1}s · {} open · {} refused · {} timed out · {} errors{stored_note}",
                         self.done_probes,
                         elapsed,
-                        self.results.len()
+                        self.probe_counts.open,
+                        self.probe_counts.refused,
+                        self.probe_counts.timed_out,
+                        self.probe_counts.errors
                     ),
                 );
             } else {
                 self.set_status(
                     StatusLevel::Success,
                     format!(
-                        "Done in {:.1}s · {} probes · {} open ports",
+                        "Done in {:.1}s · {} probes · {} open · {} refused · {} timed out · {} errors{stored_note}",
                         elapsed,
                         self.done_probes,
-                        self.results.len()
+                        self.probe_counts.open,
+                        self.probe_counts.refused,
+                        self.probe_counts.timed_out,
+                        self.probe_counts.errors
                     ),
                 );
             }
@@ -690,6 +867,7 @@ fn contains_ascii_case_insensitive(haystack: &str, needle_lower: &str) -> bool {
 
 impl App {
     pub fn update_ui(&mut self, ui: &mut egui::Ui) {
+        self.poll_export_task(ui.ctx());
         let processed = self.drain_events_with_budget(MAX_EVENTS_PER_FRAME);
 
         let is_cmd = |m: &egui::Modifiers| m.command || m.ctrl || m.mac_cmd;
@@ -862,7 +1040,7 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
+    use std::net::{IpAddr, Ipv4Addr};
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
 
@@ -881,12 +1059,53 @@ mod tests {
     }
 
     fn sample_result(host: u8, port: u16, service: &'static str, rtt_ms: u64) -> ScanResult {
-        ScanResult {
-            ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, host)),
+        ScanResult::new(
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, host)),
             port,
             service,
-            rtt: Duration::from_millis(rtt_ms),
-        }
+            Duration::from_millis(rtt_ms),
+        )
+    }
+
+    #[test]
+    fn loading_profile_updates_inputs_and_invalid_profile_is_atomic() {
+        let path = std::env::temp_dir().join("ip_port_scanner_app_profile_test.json");
+        let mut app = App::default_state();
+        app.targets_input = "192.168.1.1".to_owned();
+        app.ports_input = "22".to_owned();
+        app.timeout_ms = 1200;
+        app.concurrency = 64;
+
+        let profile = crate::profile::ScanProfile::new(
+            "127.0.0.1".to_owned(),
+            "80,443".to_owned(),
+            500,
+            12,
+            true,
+            1500,
+            crate::scanner::ScanProtocol::Udp,
+        );
+        crate::profile::save(&path, &profile).unwrap();
+        app.load_profile(&path);
+        assert_eq!(app.targets_input, "127.0.0.1");
+        assert_eq!(app.ports_input, "80,443");
+        assert_eq!(app.timeout_ms, 500);
+        assert_eq!(app.concurrency, 12);
+        assert!(app.banner_grabbing);
+        assert_eq!(app.banner_timeout_ms, 1500);
+        assert_eq!(app.protocol, crate::scanner::ScanProtocol::Udp);
+        assert_eq!(app.refresh_input_preview().unwrap().ports, 2);
+
+        std::fs::write(
+            &path,
+            r#"{"version":1,"targets":"http://invalid","ports":"80","timeout_ms":500,"concurrency":12}"#,
+        )
+        .unwrap();
+        app.load_profile(&path);
+        assert_eq!(app.targets_input, "127.0.0.1");
+        assert_eq!(app.ports_input, "80,443");
+        assert_eq!(app.status_level, StatusLevel::Error);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -898,11 +1117,27 @@ mod tests {
         tx.blocking_send(ScanEvent::Progress {
             done: 150,
             total: 200,
+            counts: ProbeCounts {
+                open: 1,
+                open_filtered: 0,
+                refused: 149,
+                timed_out: 0,
+                unreachable: 0,
+                errors: 0,
+            },
         })
         .unwrap();
         tx.blocking_send(ScanEvent::Progress {
             done: 100,
             total: 200,
+            counts: ProbeCounts {
+                open: 1,
+                open_filtered: 0,
+                refused: 99,
+                timed_out: 0,
+                unreachable: 0,
+                errors: 0,
+            },
         })
         .unwrap();
         tx.blocking_send(ScanEvent::Open(sample_result(1, 80, "http", 5)))
@@ -912,22 +1147,36 @@ mod tests {
             .send(ScanEvent::Finished {
                 done: 200,
                 cancelled: false,
+                counts: ProbeCounts {
+                    open: 1,
+                    open_filtered: 0,
+                    refused: 199,
+                    timed_out: 0,
+                    unreachable: 0,
+                    errors: 0,
+                },
             })
             .unwrap();
 
         assert_eq!(app.drain_events_with_budget(2), 2);
         assert_eq!(app.done_probes, 150);
+        assert_eq!(app.probe_counts.refused, 149);
         assert!(app.is_running());
 
         assert_eq!(app.drain_events_with_budget(2), 2);
         assert_eq!(app.done_probes, 150);
+        assert_eq!(app.probe_counts.refused, 149);
         assert_eq!(app.results.len(), 1);
         assert!(app.is_running());
 
         assert_eq!(app.drain_events_with_budget(2), 1);
         assert_eq!(app.done_probes, 200);
+        assert_eq!(app.probe_counts.done(), 200);
+        assert_eq!(app.probe_counts.open, 1);
+        assert_eq!(app.probe_counts.refused, 199);
         assert!(!app.is_running());
         assert_eq!(app.status_level, StatusLevel::Success);
+        assert!(app.status.contains("199 refused"));
     }
 
     #[test]
@@ -945,6 +1194,27 @@ mod tests {
         assert!(!app.is_running());
         assert_eq!(app.status_level, StatusLevel::Error);
         assert!(app.status.contains("runtime failed"));
+    }
+
+    #[test]
+    fn result_storage_stops_at_limit_and_counts_dropped_rows() {
+        let mut app = App::default_state();
+        for index in 0..MAX_STORED_RESULTS {
+            app.push_result(sample_result(
+                1,
+                (index % u16::MAX as usize + 1) as u16,
+                "unknown",
+                1,
+            ));
+        }
+        app.push_result(sample_result(1, 1, "unknown", 1));
+
+        assert_eq!(app.results.len(), MAX_STORED_RESULTS);
+        assert_eq!(app.rows.len(), MAX_STORED_RESULTS);
+        assert_eq!(app.dropped_open_results, 1);
+
+        app.clear_results();
+        assert_eq!(app.dropped_open_results, 0);
     }
 
     #[test]
@@ -1006,6 +1276,14 @@ mod tests {
             .send(ScanEvent::Finished {
                 done: 2,
                 cancelled: true,
+                counts: ProbeCounts {
+                    open: 1,
+                    open_filtered: 0,
+                    refused: 1,
+                    timed_out: 0,
+                    unreachable: 0,
+                    errors: 0,
+                },
             })
             .unwrap();
 
@@ -1037,8 +1315,21 @@ mod tests {
             app.refresh_input_preview().unwrap(),
             ScopePreview {
                 targets: 1,
+                hostnames: 0,
                 ports: 3,
                 probes: 3
+            }
+        );
+
+        // Hostname in targets preview
+        app.targets_input = "localhost\n127.0.0.1".to_owned();
+        assert_eq!(
+            app.refresh_input_preview().unwrap(),
+            ScopePreview {
+                targets: 2,
+                hostnames: 1,
+                ports: 3,
+                probes: 6
             }
         );
 
@@ -1072,12 +1363,12 @@ mod tests {
         for idx in 0..20_000u32 {
             let ip = IpAddr::V4(Ipv4Addr::from(0x0a00_0001 + (idx / 100)));
             let port = ((idx % 100) + 1) as u16;
-            app.push_result(ScanResult {
+            app.push_result(ScanResult::new(
                 ip,
                 port,
-                service: crate::scanner::probe::service_name(port),
-                rtt: Duration::from_micros((idx % 5_000) as u64 + 100),
-            });
+                crate::scanner::probe::service_name(port),
+                Duration::from_micros((idx % 5_000) as u64 + 100),
+            ));
         }
 
         app.results_filter = "http".to_owned();
@@ -1440,12 +1731,12 @@ mod tests {
         for idx in 0..20_000u32 {
             let ip = IpAddr::V4(Ipv4Addr::from(0x0a00_0001 + (idx / 100)));
             let port = ((idx % 100) + 1) as u16;
-            app.push_result(ScanResult {
+            app.push_result(ScanResult::new(
                 ip,
                 port,
-                service: crate::scanner::probe::service_name(port),
-                rtt: Duration::from_micros((idx % 5_000) as u64 + 100),
-            });
+                crate::scanner::probe::service_name(port),
+                Duration::from_micros((idx % 5_000) as u64 + 100),
+            ));
         }
 
         let resolutions = [
@@ -1539,17 +1830,25 @@ mod tests {
         for idx in 0..COUNT {
             let ip = IpAddr::V4(Ipv4Addr::from(0x0a00_0001 + (idx / 100)));
             let port = ((idx % 100) + 1) as u16;
-            let _ = tx.blocking_send(ScanEvent::Open(ScanResult {
+            let _ = tx.blocking_send(ScanEvent::Open(ScanResult::new(
                 ip,
                 port,
-                service: crate::scanner::probe::service_name(port),
-                rtt: Duration::from_micros((idx % 5_000) as u64 + 100),
-            }));
+                crate::scanner::probe::service_name(port),
+                Duration::from_micros((idx % 5_000) as u64 + 100),
+            )));
         }
         drop(tx);
         let _ = terminal_tx.send(ScanEvent::Finished {
             done: COUNT as usize,
             cancelled: false,
+            counts: ProbeCounts {
+                open: COUNT as usize,
+                open_filtered: 0,
+                refused: 0,
+                timed_out: 0,
+                unreachable: 0,
+                errors: 0,
+            },
         });
 
         let mut drained_total = 0;
@@ -1950,5 +2249,111 @@ mod tests {
                 "Error/Panel contrast {ratio_error:.2} under gamma {gamma} must meet WCAG AA (>= 4.5)"
             );
         }
+    }
+
+    #[test]
+    fn export_large_dataset_during_active_scan_and_io_completion_test() {
+        let mut app = App::default_state();
+        let ctx = egui::Context::default();
+        crate::ui::theme::apply(&ctx);
+
+        const COUNT: usize = 20_000;
+        for idx in 0..COUNT {
+            app.push_result(sample_result(
+                (idx % 250 + 1) as u8,
+                (idx % 1000 + 1) as u16,
+                "service",
+                (idx % 50 + 1) as u64,
+            ));
+        }
+        assert_eq!(app.results.len(), COUNT);
+
+        // Simulate an active running scan
+        let (_tx, rx) = mpsc::channel(64);
+        let (_terminal_tx, terminal_rx) = std::sync::mpsc::channel();
+        let cancel = CancellationToken::new();
+        app.scan = Some(ScanHandle::from_channels(rx, terminal_rx, cancel));
+        app.status_level = StatusLevel::Running;
+        app.status = "Scanning...".to_owned();
+        assert!(app.is_running());
+
+        let temp_dir = std::env::temp_dir().join("ip_port_scanner_large_export_test");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let csv_path = temp_dir.join("large_results.csv");
+        let json_path = temp_dir.join("large_results.json");
+
+        // 1. Export CSV in background thread (simulating export_csv task spawn)
+        let snapshot = app.results.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let path_clone = csv_path.clone();
+        let t_start = Instant::now();
+        let thread_handle = std::thread::Builder::new()
+            .name("export-writer".to_owned())
+            .spawn(move || {
+                let res =
+                    crate::export::save_csv(&path_clone, &snapshot).map_err(|err| err.to_string());
+                let _ = sender.send((path_clone, COUNT, res));
+            })
+            .unwrap();
+        app.export_task = Some(ExportTask { receiver });
+
+        // While export is running in background, push new results into app (verifying snapshot isolation)
+        for idx in 0..500 {
+            app.push_result(sample_result(1, (1000 + idx) as u16, "new-service", 5));
+        }
+        assert_eq!(app.results.len(), COUNT + 500);
+
+        // Wait for thread to finish and poll task in UI loop
+        thread_handle.join().unwrap();
+        let write_elapsed = t_start.elapsed();
+        app.poll_export_task(&ctx);
+
+        assert!(!app.is_exporting());
+        assert!(app.is_running());
+        assert_eq!(app.status_level, StatusLevel::Running);
+        assert_eq!(app.last_export_path, Some(csv_path.clone()));
+        assert!(
+            app.toasts
+                .iter()
+                .any(|t| t.message.contains("Exported 20000 results"))
+        );
+
+        // Verify CSV on disk
+        let csv_content = std::fs::read_to_string(&csv_path).unwrap();
+        let line_count = csv_content.lines().count();
+        assert_eq!(line_count, COUNT + 1);
+
+        // 2. Export JSON in background thread
+        let json_snapshot = app.results.clone();
+        let total_json = json_snapshot.len();
+        let (sender_json, receiver_json) = std::sync::mpsc::channel();
+        let json_path_clone = json_path.clone();
+        let thread_json = std::thread::Builder::new()
+            .name("export-writer".to_owned())
+            .spawn(move || {
+                let res = crate::export::save_json(&json_path_clone, &json_snapshot)
+                    .map_err(|err| err.to_string());
+                let _ = sender_json.send((json_path_clone, total_json, res));
+            })
+            .unwrap();
+        app.export_task = Some(ExportTask {
+            receiver: receiver_json,
+        });
+
+        thread_json.join().unwrap();
+        app.poll_export_task(&ctx);
+        assert!(!app.is_exporting());
+
+        // Verify JSON on disk
+        let json_content = std::fs::read_to_string(&json_path).unwrap();
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&json_content).unwrap();
+        assert_eq!(parsed.len(), total_json);
+
+        println!(
+            "Large CSV export of 20,000 rows completed in {:.2} ms",
+            write_elapsed.as_secs_f64() * 1000.0
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

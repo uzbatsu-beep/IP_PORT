@@ -1,7 +1,20 @@
-use std::fmt::Write as _;
+use std::io::{self, BufWriter, Write};
 use std::path::Path;
 
 use crate::scanner::ScanResult;
+
+/// Версия схемы форматов экспорта (CSV/JSON v1).
+#[allow(dead_code)]
+pub const EXPORT_FORMAT_VERSION: u32 = 1;
+
+/// Возвращает текущую версию спецификации экспорта.
+#[allow(dead_code)]
+pub fn export_format_version() -> u32 {
+    EXPORT_FORMAT_VERSION
+}
+
+/// Канонический заголовок CSV версии 1 (RFC 4180).
+pub const CSV_HEADER_V1: &str = "ip,port,service,rtt_ms";
 
 /// Генерирует имя файла экспорта с текущей временной меткой: scan_results_YYYYMMDD_HHMMSS.{extension}
 pub fn default_export_filename(extension: &str) -> String {
@@ -64,37 +77,88 @@ pub fn reveal_in_file_manager(path: &Path) {
 }
 
 /// Сохраняет результаты в CSV.
-pub fn save_csv(path: &Path, results: &[ScanResult]) -> std::io::Result<()> {
-    let mut out = String::from("ip,port,service,rtt_ms\n");
+pub fn save_csv(path: &Path, results: &[ScanResult]) -> io::Result<()> {
+    let file = std::fs::File::create(path)?;
+    let mut out = BufWriter::new(file);
+    writeln!(out, "{CSV_HEADER_V1}")?;
     for result in results {
-        let _ = writeln!(
-            out,
-            "{},{},{},{:.2}",
-            result.ip,
-            result.port,
-            result.service,
-            result.rtt.as_secs_f64() * 1000.0
-        );
+        write_csv_field(&mut out, &result.ip.to_string())?;
+        write!(out, ",{},", result.port)?;
+        write_csv_field(&mut out, result.service)?;
+        writeln!(out, ",{:.2}", result.rtt.as_secs_f64() * 1000.0)?;
     }
-    std::fs::write(path, out)
+    out.flush()
+}
+
+fn write_csv_field(out: &mut impl Write, value: &str) -> io::Result<()> {
+    if value
+        .bytes()
+        .any(|byte| matches!(byte, b',' | b'"' | b'\r' | b'\n'))
+    {
+        out.write_all(b"\"")?;
+        for character in value.chars() {
+            if character == '"' {
+                out.write_all(b"\"\"")?;
+            } else {
+                let mut buffer = [0; 4];
+                out.write_all(character.encode_utf8(&mut buffer).as_bytes())?;
+            }
+        }
+        out.write_all(b"\"")
+    } else {
+        out.write_all(value.as_bytes())
+    }
 }
 
 /// Сохраняет результаты в JSON.
-pub fn save_json(path: &Path, results: &[ScanResult]) -> std::io::Result<()> {
-    let mut out = String::from("[\n");
+pub fn save_json(path: &Path, results: &[ScanResult]) -> io::Result<()> {
+    let file = std::fs::File::create(path)?;
+    let mut out = BufWriter::new(file);
+    writeln!(out, "[")?;
     for (idx, result) in results.iter().enumerate() {
         let comma = if idx + 1 == results.len() { "" } else { "," };
-        let _ = writeln!(
+        write!(out, "  {{\"ip\": ")?;
+        write_json_string(&mut out, &result.ip.to_string())?;
+        write!(out, ", \"port\": {}, \"protocol\": ", result.port)?;
+        write_json_string(&mut out, result.protocol.as_str())?;
+        write!(out, ", \"state\": ")?;
+        write_json_string(&mut out, result.state.as_str())?;
+        write!(out, ", \"service\": ")?;
+        write_json_string(&mut out, result.service)?;
+        write!(out, ", \"verified\": {}", result.service_verified)?;
+        if let Some(banner) = &result.banner {
+            write!(out, ", \"banner\": ")?;
+            write_json_string(&mut out, banner)?;
+        }
+        writeln!(
             out,
-            "  {{\"ip\": \"{}\", \"port\": {}, \"service\": \"{}\", \"rtt_ms\": {:.2}}}{comma}",
-            result.ip,
-            result.port,
-            result.service,
+            ", \"rtt_ms\": {:.2}}}{comma}",
             result.rtt.as_secs_f64() * 1000.0
-        );
+        )?;
     }
-    out.push_str("]\n");
-    std::fs::write(path, out)
+    writeln!(out, "]")?;
+    out.flush()
+}
+
+fn write_json_string(out: &mut impl Write, value: &str) -> io::Result<()> {
+    out.write_all(b"\"")?;
+    for character in value.chars() {
+        match character {
+            '"' => out.write_all(b"\\\"")?,
+            '\\' => out.write_all(b"\\\\")?,
+            '\u{0008}' => out.write_all(b"\\b")?,
+            '\u{000C}' => out.write_all(b"\\f")?,
+            '\n' => out.write_all(b"\\n")?,
+            '\r' => out.write_all(b"\\r")?,
+            '\t' => out.write_all(b"\\t")?,
+            c if c <= '\u{001F}' => write!(out, "\\u{:04x}", c as u32)?,
+            c => {
+                let mut buffer = [0; 4];
+                out.write_all(c.encode_utf8(&mut buffer).as_bytes())?;
+            }
+        }
+    }
+    out.write_all(b"\"")
 }
 
 #[cfg(test)]
@@ -104,12 +168,12 @@ mod tests {
     use std::time::Duration;
 
     fn sample() -> Vec<ScanResult> {
-        vec![ScanResult {
-            ip: "10.0.0.1".parse::<IpAddr>().unwrap(),
-            port: 80,
-            service: "http",
-            rtt: Duration::from_millis(12),
-        }]
+        vec![ScanResult::new(
+            "10.0.0.1".parse::<IpAddr>().unwrap(),
+            80,
+            "http",
+            Duration::from_millis(12),
+        )]
     }
 
     #[test]
@@ -133,6 +197,40 @@ mod tests {
     }
 
     #[test]
+    fn escapes_csv_and_json_text_fields() {
+        let results = vec![ScanResult::new(
+            "10.0.0.1".parse().unwrap(),
+            8080,
+            "custom,\"service\"\nnext\t\0",
+            Duration::from_millis(7),
+        )];
+        let dir = std::env::temp_dir().join("ip_port_scanner_export_escaping_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let csv = dir.join("escaped.csv");
+        let json = dir.join("escaped.json");
+
+        save_csv(&csv, &results).unwrap();
+        save_json(&json, &results).unwrap();
+
+        let csv_text = std::fs::read_to_string(&csv).unwrap();
+        let json_text = std::fs::read_to_string(&json).unwrap();
+        assert!(csv_text.contains("\"custom,\"\"service\"\"\nnext\t\0\""));
+        assert!(json_text.contains("custom,\\\"service\\\"\\nnext\\t\\u0000"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reports_file_system_errors() {
+        let missing = std::env::temp_dir()
+            .join("ip_port_scanner_missing_export_directory")
+            .join("out.csv");
+        let _ = std::fs::remove_dir_all(missing.parent().unwrap());
+        assert!(save_csv(&missing, &sample()).is_err());
+        assert!(save_json(&missing, &sample()).is_err());
+    }
+
+    #[test]
     fn generates_timestamped_default_export_filename() {
         let name_csv = default_export_filename("csv");
         let name_json = default_export_filename("json");
@@ -153,5 +251,71 @@ mod tests {
                 .filter(|c| *c != '_')
                 .all(|c| c.is_ascii_digit())
         );
+    }
+
+    #[test]
+    fn verifies_csv_and_json_format_v1_compatibility() {
+        let dir = std::env::temp_dir().join("ip_port_scanner_format_compat_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let csv_path = dir.join("compat.csv");
+        let json_path = dir.join("compat.json");
+
+        let items = vec![
+            ScanResult::with_banner(
+                "192.168.1.100".parse().unwrap(),
+                80,
+                "http",
+                Duration::from_micros(12500),
+                Some("nginx/1.18".to_owned()),
+                true,
+            ),
+            ScanResult::new(
+                "::1".parse().unwrap(),
+                8080,
+                "http-alt, \"proxy\"",
+                Duration::from_micros(520),
+            ),
+        ];
+
+        save_csv(&csv_path, &items).unwrap();
+        save_json(&json_path, &items).unwrap();
+
+        assert_eq!(EXPORT_FORMAT_VERSION, 1);
+
+        // 1. Validate CSV header and column format
+        let csv_text = std::fs::read_to_string(&csv_path).unwrap();
+        let mut lines = csv_text.lines();
+        assert_eq!(lines.next().unwrap(), CSV_HEADER_V1);
+        let first_row = lines.next().unwrap();
+        assert_eq!(first_row, "192.168.1.100,80,http,12.50");
+        let second_row = lines.next().unwrap();
+        assert_eq!(second_row, "::1,8080,\"http-alt, \"\"proxy\"\"\",0.52");
+
+        // 2. Validate JSON structure, types and field names with serde_json
+        let json_text = std::fs::read_to_string(&json_path).unwrap();
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&json_text).unwrap();
+        assert_eq!(parsed.len(), 2);
+
+        // Record 1
+        assert_eq!(parsed[0]["ip"], "192.168.1.100");
+        assert_eq!(parsed[0]["port"], 80);
+        assert_eq!(parsed[0]["protocol"], "TCP");
+        assert_eq!(parsed[0]["state"], "Open");
+        assert_eq!(parsed[0]["service"], "http");
+        assert_eq!(parsed[0]["rtt_ms"], 12.50);
+        assert_eq!(parsed[0]["verified"], true);
+        assert_eq!(parsed[0]["banner"], "nginx/1.18");
+
+        // Record 2 (IPv6, escaped quotes and comma)
+        assert_eq!(parsed[1]["ip"], "::1");
+        assert_eq!(parsed[1]["port"], 8080);
+        assert_eq!(parsed[1]["protocol"], "TCP");
+        assert_eq!(parsed[1]["state"], "Open");
+        assert_eq!(parsed[1]["service"], "http-alt, \"proxy\"");
+        assert_eq!(parsed[1]["rtt_ms"], 0.52);
+        assert_eq!(parsed[1]["verified"], false);
+        assert_eq!(parsed[1].get("banner"), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

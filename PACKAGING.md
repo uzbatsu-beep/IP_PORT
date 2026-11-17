@@ -1,0 +1,173 @@
+# Руководство по сборке, установке и упаковке
+
+Данный документ описывает требования к окружению, системные зависимости, инструкции по локальной сборке и процедуру упаковки бинарных релизов для операционных систем **Windows**, **Linux** и **macOS**.
+
+---
+
+## 1. Системные требования
+
+### 1.1. Минимальная версия Rust (MSRV)
+- **Rust:** `1.85.0` или новее (редакция `2024 edition`).
+- **Cargo:** встроенный в дистрибутив Rust.
+
+### 1.2. Целевые платформы (Tier 1 & Tier 2)
+
+| Платформа | Target Triple | Формат пакета | Графический бэкенд |
+|---|---|---|---|
+| **Windows x64** | `x86_64-pc-windows-msvc` | `.zip` | WGL / OpenGL (glow) |
+| **Linux x64** | `x86_64-unknown-linux-gnu` | `.tar.gz` | Wayland / X11 / Mesa |
+| **macOS Apple Silicon** | `aarch64-apple-darwin` | `.tar.gz` | Cocoa / OpenGL |
+| **macOS Intel** | `x86_64-apple-darwin` | `.tar.gz` | Cocoa / OpenGL |
+
+---
+
+## 2. Установка зависимостей для сборки
+
+### 2.1. Windows
+Для сборки требуется компилятор MSVC (Visual Studio 2022 C++ Build Tools) и Rust:
+```powershell
+winget install Rustlang.Rustup
+rustup default stable
+```
+Дополнительных системных библиотек не требуется: приложение компилируется в автономный исполняемый файл `ip_port_scanner.exe` со статическим связыванием рантайма Rust.
+
+### 2.2. Linux (Debian, Ubuntu, Linux Mint)
+Для сборки требуются заголовочные файлы X11, Wayland, xkbcommon и Mesa:
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  build-essential \
+  pkg-config \
+  libxkbcommon-dev \
+  libwayland-dev \
+  libgl1-mesa-dev \
+  libx11-dev \
+  libxcursor-dev \
+  libxi-dev \
+  libxrandr-dev
+```
+
+Для Fedora / RHEL:
+```bash
+sudo dnf install -y \
+  gcc \
+  pkgconf-pkg-config \
+  libxkbcommon-devel \
+  wayland-devel \
+  mesa-libGL-devel \
+  libX11-devel \
+  libXcursor-devel \
+  libXi-devel \
+  libXrandr-devel
+```
+
+Для Arch Linux:
+```bash
+sudo pacman -S --needed base-devel libxkbcommon wayland mesa libx11 libxcursor libxi libxrandr
+```
+
+### 2.3. macOS
+Требуются Command Line Tools:
+```bash
+xcode-select --install
+```
+
+---
+
+## 3. Сборка из исходного кода
+
+```bash
+# Клонирование репозитория
+git clone https://github.com/your-org/ip_port_scanner.git
+cd ip_port_scanner
+
+# Проверка форматирования и линтинг
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+
+# Запуск полного набора тестов
+cargo test
+
+# Сборка оптимизированного релизного бинарника
+cargo build --release
+```
+
+Готовый исполняемый файл будет находиться в директории:
+- **Windows:** `target\release\ip_port_scanner.exe`
+- **Linux / macOS:** `target/release/ip_port_scanner`
+
+---
+
+## 4. Установка готового бинарного релиза
+
+### 4.1. Windows
+1. Скачайте архив `ip_port_scanner-vX.Y.Z-x86_64-pc-windows-msvc.zip` со страницы релизов.
+2. Распакуйте архив в любую удобную папку (например, `C:\Tools\ip_port_scanner`).
+3. Запустите `ip_port_scanner.exe`.
+4. (Опционально) Создайте ярлык на рабочем столе или добавьте путь в переменную среды `PATH`.
+
+### 4.2. Linux
+1. Скачайте архив `ip_port_scanner-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz`.
+2. Распакуйте архив:
+   ```bash
+   tar -xzf ip_port_scanner-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz
+   cd ip_port_scanner-vX.Y.Z-x86_64-unknown-linux-gnu
+   ```
+3. Скопируйте бинарный файл в `/usr/local/bin`:
+   ```bash
+   sudo install -m 755 ip_port_scanner /usr/local/bin/
+   ```
+4. Для интеграции в меню приложений создайте файл `~/.local/share/applications/ip_port_scanner.desktop`:
+   ```ini
+   [Desktop Entry]
+   Name=IP / PORT Scanner
+   Comment=Fast cross-platform async network scanner
+   Exec=ip_port_scanner
+   Terminal=false
+   Type=Application
+   Categories=Network;Security;
+   ```
+
+### 4.3. macOS
+1. Скачайте архив для вашей архитектуры:
+   - Для компьютеров Apple Silicon (M1/M2/M3/M4): `ip_port_scanner-vX.Y.Z-aarch64-apple-darwin.tar.gz`
+   - Для компьютеров Intel: `ip_port_scanner-vX.Y.Z-x86_64-apple-darwin.tar.gz`
+2. Распакуйте архив:
+   ```bash
+   tar -xzf ip_port_scanner-vX.Y.Z-aarch64-apple-darwin.tar.gz
+   ```
+3. При необходимости снимите атрибут карантина macOS Gatekeeper:
+   ```bash
+   xattr -cr ip_port_scanner
+   ```
+4. Переместите бинарный файл в `/usr/local/bin`:
+   ```bash
+   sudo cp ip_port_scanner /usr/local/bin/
+   ```
+
+---
+
+## 5. Процесс выпуска новой версии (Release Process)
+
+1. Обновите версию в `Cargo.toml` (`version = "X.Y.Z"`).
+2. Задокументируйте изменения в [CHANGELOG.md](CHANGELOG.md) в соответствии с форматом Keep a Changelog.
+3. Убедитесь, что все локальные проверки пройдены:
+   ```bash
+   cargo fmt --check
+   cargo clippy --all-targets -- -D warnings
+   cargo test
+   ```
+4. Зафиксируйте изменения в Git:
+   ```bash
+   git commit -am "chore(release): bump version to vX.Y.Z"
+   ```
+5. Создайте аннотированный тег:
+   ```bash
+   git tag -a vX.Y.Z -m "Release vX.Y.Z"
+   git push origin main --tags
+   ```
+6. Пайплайн GitHub Actions (`release.yml`) автоматически:
+   - Соберёт релизные бинарники под Windows, Linux, macOS (Apple Silicon и Intel).
+   - Упакует архивы `.zip` и `.tar.gz` вместе с `README.md`, `LICENSE` и `CHANGELOG.md`.
+   - Рассчитает контрольные суммы `SHA256SUMS.txt`.
+   - Опубликует релиз на GitHub Releases с прикреплёнными архивами и чексуммами.

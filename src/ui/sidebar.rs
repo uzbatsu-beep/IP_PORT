@@ -23,12 +23,37 @@ fn ports_input_matches(input: &str, ports: &str) -> bool {
 pub fn show(app: &mut App, ui: &mut Ui) {
     ui.add_space(4.0);
     ui.heading(RichText::new("IP / PORT Scanner").strong());
-    ui.label(RichText::new("Async TCP port scanner").weak());
+    ui.label(RichText::new("Async TCP & UDP port scanner").weak());
     ui.add_space(12.0);
 
     let running = app.is_running();
     let stopping = app.is_stopping();
     ui.add_enabled_ui(!running, |ui| {
+        ui.label(RichText::new("Protocol").strong());
+        ui.horizontal(|ui| {
+            let tcp_active = app.protocol == crate::scanner::ScanProtocol::Tcp;
+            let udp_active = app.protocol == crate::scanner::ScanProtocol::Udp;
+            if ui.selectable_label(tcp_active, "TCP").clicked() {
+                app.protocol = crate::scanner::ScanProtocol::Tcp;
+            }
+            if ui.selectable_label(udp_active, "UDP").clicked() {
+                app.protocol = crate::scanner::ScanProtocol::Udp;
+                if app.concurrency > 64 {
+                    app.concurrency = 32;
+                }
+            }
+        });
+        if app.protocol == crate::scanner::ScanProtocol::Udp {
+            ui.label(
+                RichText::new(
+                    "UDP is connectionless. Silent ports are marked Open|Filtered (concurrency ≤ 64 recommended).",
+                )
+                .weak()
+                .small(),
+            );
+        }
+
+        ui.add_space(8.0);
         ui.label(RichText::new("Targets").strong());
         ui.add(
             egui::TextEdit::multiline(&mut app.targets_input)
@@ -74,6 +99,52 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         ui.label(RichText::new("Concurrency").strong());
         ui.add(egui::Slider::new(&mut app.concurrency, 1..=1024).logarithmic(true));
         ui.label(RichText::new("Parallel connection attempts").weak().small());
+
+        ui.add_space(8.0);
+        ui.checkbox(&mut app.banner_grabbing, "Grab service banners")
+            .on_hover_text(
+                "Read service greetings or send probe to identify confirmed services (SSH, HTTP, FTP, etc.)",
+            );
+
+        if app.banner_grabbing {
+            ui.add_space(4.0);
+            ui.label(RichText::new("Banner timeout").strong());
+            ui.add(
+                egui::Slider::new(&mut app.banner_timeout_ms, 100..=5000)
+                    .suffix(" ms")
+                    .logarithmic(true),
+            );
+            ui.label(
+                RichText::new("Per-port banner read timeout (max 256 bytes)")
+                    .weak()
+                    .small(),
+            );
+        }
+
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .button("Save profile...")
+                .on_hover_text("Save targets, ports, timeout, concurrency and banner settings as JSON")
+                .clicked()
+                && let Some(path) = rfd::FileDialog::new()
+                    .set_file_name("scan_profile.json")
+                    .add_filter("JSON profile", &["json"])
+                    .save_file()
+            {
+                app.save_profile(&path);
+            }
+            if ui
+                .button("Load profile...")
+                .on_hover_text("Load and validate settings from a JSON profile")
+                .clicked()
+                && let Some(path) = rfd::FileDialog::new()
+                    .add_filter("JSON profile", &["json"])
+                    .pick_file()
+            {
+                app.load_profile(&path);
+            }
+        });
 
         ui.add_space(8.0);
         egui::CollapsingHeader::new(RichText::new("Services database").small().strong())
@@ -156,8 +227,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             app.stop_scan();
         }
 
-        let can_export = !app.results.is_empty();
-        let export_hint = if running {
+        let can_export = !app.results.is_empty() && !app.is_exporting();
+        let export_hint = if app.is_exporting() {
+            "An export is already in progress"
+        } else if running {
             "Save a snapshot of all collected open ports (ignores active table filter)"
         } else {
             "Save all collected open ports (ignores active table filter)"
@@ -225,11 +298,24 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 fn scope_feedback(preview: &Result<ScopePreview, String>, running: bool, ui: &mut Ui) {
     match preview {
         Ok(scope) if !running => {
-            ui.label(
-                RichText::new(format!(
-                    "Planned scope: {} target{} × {} port{} ({} probes)",
+            let targets_str = if scope.hostnames > 0 {
+                format!(
+                    "{} target{} ({} hostname{})",
                     scope.targets,
                     if scope.targets == 1 { "" } else { "s" },
+                    scope.hostnames,
+                    if scope.hostnames == 1 { "" } else { "s" },
+                )
+            } else {
+                format!(
+                    "{} target{}",
+                    scope.targets,
+                    if scope.targets == 1 { "" } else { "s" },
+                )
+            };
+            ui.label(
+                RichText::new(format!(
+                    "Planned scope: {targets_str} × {} port{} (~{} probes)",
                     scope.ports,
                     if scope.ports == 1 { "" } else { "s" },
                     scope.probes
@@ -270,9 +356,49 @@ fn summary(app: &App, preview: &Result<ScopePreview, String>, ui: &mut Ui) {
             ui.label(probes.to_string());
             ui.end_row();
 
-            ui.label(RichText::new("Open ports").weak());
+            ui.label(RichText::new("Stored open results").weak());
             ui.label(RichText::new(app.results.len().to_string()).strong());
             ui.end_row();
+
+            ui.label(RichText::new("Open probes").weak());
+            ui.label(app.probe_counts.open.to_string());
+            ui.end_row();
+
+            if app.probe_counts.open_filtered > 0 {
+                ui.label(RichText::new("Open|Filtered").color(theme::WARNING))
+                    .on_hover_text(
+                        "No response received (UDP service is silent or packet filtered by firewall)",
+                    );
+                ui.label(app.probe_counts.open_filtered.to_string());
+                ui.end_row();
+            }
+
+            ui.label(RichText::new("Refused").weak());
+            ui.label(app.probe_counts.refused.to_string());
+            ui.end_row();
+
+            ui.label(RichText::new("Timed out").weak());
+            ui.label(app.probe_counts.timed_out.to_string());
+            ui.end_row();
+
+            if app.probe_counts.unreachable > 0 {
+                ui.label(RichText::new("Unreachable").color(theme::WARNING))
+                    .on_hover_text(
+                        "Network or host unreachable (e.g. IPv6 unrouted or disabled on host)",
+                    );
+                ui.label(app.probe_counts.unreachable.to_string());
+                ui.end_row();
+            }
+
+            ui.label(RichText::new("Other errors").weak());
+            ui.label(app.probe_counts.errors.to_string());
+            ui.end_row();
+
+            if app.dropped_open_results > 0 {
+                ui.label(RichText::new("Not stored (limit)").color(theme::WARNING));
+                ui.label(app.dropped_open_results.to_string());
+                ui.end_row();
+            }
         });
 
     ui.add_space(6.0);
