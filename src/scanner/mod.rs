@@ -1,9 +1,11 @@
+pub mod interfaces;
 pub mod presets;
 pub mod probe;
 pub mod services;
 pub mod targets;
 pub mod udp;
 
+pub use interfaces::NetworkInterfaceInfo;
 pub use targets::TargetList;
 pub use udp::{PortState, ScanProtocol};
 
@@ -27,6 +29,7 @@ pub struct ScanConfig {
     pub banner_grabbing: bool,
     pub banner_timeout: Duration,
     pub protocol: ScanProtocol,
+    pub bind_addr: Option<IpAddr>,
 }
 
 /// Найденный открытый порт.
@@ -265,6 +268,7 @@ pub fn spawn(config: ScanConfig) -> Result<ScanHandle, String> {
         None
     };
     let protocol = config.protocol;
+    let bind_addr = config.bind_addr;
     spawn_with(
         config,
         move || {
@@ -276,8 +280,10 @@ pub fn spawn(config: ScanConfig) -> Result<ScanHandle, String> {
         },
         move |ip, port, timeout| async move {
             match protocol {
-                ScanProtocol::Tcp => probe::probe(ip, port, timeout, banner_config).await,
-                ScanProtocol::Udp => probe::probe_udp(ip, port, timeout).await,
+                ScanProtocol::Tcp => {
+                    probe::probe(ip, port, timeout, banner_config, bind_addr).await
+                }
+                ScanProtocol::Udp => probe::probe_udp(ip, port, timeout, bind_addr).await,
             }
         },
     )
@@ -367,6 +373,7 @@ async fn run(
         None
     };
     let protocol = config.protocol;
+    let bind_addr = config.bind_addr;
     run_with_probe(
         config,
         total,
@@ -374,8 +381,10 @@ async fn run(
         cancel,
         move |ip, port, timeout| async move {
             match protocol {
-                ScanProtocol::Tcp => probe::probe(ip, port, timeout, banner_config).await,
-                ScanProtocol::Udp => probe::probe_udp(ip, port, timeout).await,
+                ScanProtocol::Tcp => {
+                    probe::probe(ip, port, timeout, banner_config, bind_addr).await
+                }
+                ScanProtocol::Udp => probe::probe_udp(ip, port, timeout, bind_addr).await,
             }
         },
     )
@@ -619,6 +628,7 @@ mod tests {
             banner_grabbing: false,
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
+            bind_addr: None,
         };
         let events = collect(
             &mut spawn_with(
@@ -710,6 +720,7 @@ mod tests {
             banner_grabbing: false,
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
+            bind_addr: None,
         };
         for _ in 0..2 {
             let events = collect(&mut spawn(config.clone()).unwrap());
@@ -761,6 +772,7 @@ mod tests {
             banner_grabbing: false,
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
+            bind_addr: None,
         };
         let (tx, mut rx) = mpsc::channel(1);
         let cancel = CancellationToken::new();
@@ -796,6 +808,7 @@ mod tests {
             banner_grabbing: false,
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
+            bind_addr: None,
         };
         assert!(spawn(config).is_err());
     }
@@ -811,6 +824,7 @@ mod tests {
             banner_grabbing: false,
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
+            bind_addr: None,
         };
         let mut handle = spawn(config.clone()).unwrap();
         handle.cancel();
@@ -855,6 +869,7 @@ mod tests {
             banner_grabbing: false,
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
+            bind_addr: None,
         };
         let result = spawn_with_spawner(
             config,
@@ -887,6 +902,7 @@ mod tests {
             banner_grabbing: false,
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
+            bind_addr: None,
         };
         let mut handle = spawn_with(
             config,
@@ -911,6 +927,7 @@ mod tests {
             banner_grabbing: false,
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
+            bind_addr: None,
         };
         let mut handle = spawn_with(
             config,
@@ -946,6 +963,7 @@ mod tests {
             banner_grabbing: false,
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
+            bind_addr: None,
         };
         let mut handle = spawn_with(
             config,
@@ -1012,6 +1030,7 @@ mod tests {
             banner_grabbing: true,
             banner_timeout: Duration::from_millis(500),
             protocol: ScanProtocol::Tcp,
+            bind_addr: None,
         };
         let mut handle = spawn(config).unwrap();
         let events = collect(&mut handle);
@@ -1058,6 +1077,7 @@ mod tests {
             banner_grabbing: false,
             banner_timeout: Duration::from_millis(200),
             protocol: ScanProtocol::Udp,
+            bind_addr: None,
         };
 
         let (tx, mut rx) = mpsc::channel(16);
@@ -1096,6 +1116,7 @@ mod tests {
             banner_grabbing: false,
             banner_timeout: Duration::from_millis(500),
             protocol: ScanProtocol::Tcp,
+            bind_addr: None,
         };
 
         let (tx, mut rx) = mpsc::channel(16);
@@ -1137,6 +1158,7 @@ mod tests {
             banner_grabbing: false,
             banner_timeout: Duration::from_millis(500),
             protocol: ScanProtocol::Tcp,
+            bind_addr: None,
         };
 
         let (tx, _rx) = mpsc::channel(16);

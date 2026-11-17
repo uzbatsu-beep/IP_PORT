@@ -61,22 +61,25 @@ pub fn classify_connect_error(error: &std::io::Error) -> ProbeOutcome {
         return ProbeOutcome::Refused;
     }
 
-    if error.kind() == ErrorKind::NetworkUnreachable || error.kind() == ErrorKind::HostUnreachable {
+    if error.kind() == ErrorKind::NetworkUnreachable
+        || error.kind() == ErrorKind::HostUnreachable
+        || error.kind() == ErrorKind::AddrNotAvailable
+    {
         return ProbeOutcome::Unreachable;
     }
 
     #[cfg(target_os = "windows")]
     if let Some(code) = error.raw_os_error() {
-        // WSAEAFNOSUPPORT (10047), WSAENETUNREACH (10051), WSAEHOSTUNREACH (10065)
-        if code == 10047 || code == 10051 || code == 10065 {
+        // WSAEAFNOSUPPORT (10047), WSAEADDRNOTAVAIL (10049), WSAENETUNREACH (10051), WSAEHOSTUNREACH (10065)
+        if code == 10047 || code == 10049 || code == 10051 || code == 10065 {
             return ProbeOutcome::Unreachable;
         }
     }
 
     #[cfg(not(target_os = "windows"))]
     if let Some(code) = error.raw_os_error() {
-        // EAFNOSUPPORT (97), ENETUNREACH (101), EHOSTUNREACH (113)
-        if code == 97 || code == 101 || code == 113 {
+        // EAFNOSUPPORT (97), EADDRNOTAVAIL (99), ENETUNREACH (101), EHOSTUNREACH (113)
+        if code == 97 || code == 99 || code == 101 || code == 113 {
             return ProbeOutcome::Unreachable;
         }
     }
@@ -200,14 +203,36 @@ pub async fn grab_banner(
 
 /// Пробует установить TCP-соединение и классифицирует исход попытки.
 /// При передаче `banner_config` выполняет опциональный захват баннера.
+/// При передаче `bind_addr` связывает исходящий сокет с указанным локальным IP.
 pub async fn probe(
     ip: IpAddr,
     port: u16,
     timeout: Duration,
     banner_config: Option<BannerConfig>,
+    bind_addr: Option<IpAddr>,
 ) -> ProbeOutcome {
+    if let Some(src_ip) = bind_addr
+        && src_ip.is_ipv4() != ip.is_ipv4()
+    {
+        return ProbeOutcome::Unreachable;
+    }
+
     let started = Instant::now();
-    match tokio::time::timeout(timeout, TcpStream::connect((ip, port))).await {
+    let connect_fut = async {
+        if let Some(src_ip) = bind_addr {
+            let socket = if ip.is_ipv4() {
+                tokio::net::TcpSocket::new_v4()?
+            } else {
+                tokio::net::TcpSocket::new_v6()?
+            };
+            socket.bind(std::net::SocketAddr::new(src_ip, 0))?;
+            socket.connect(std::net::SocketAddr::new(ip, port)).await
+        } else {
+            TcpStream::connect((ip, port)).await
+        }
+    };
+
+    match tokio::time::timeout(timeout, connect_fut).await {
         Ok(Ok(mut stream)) => {
             let rtt = started.elapsed();
             if let Some(config) = banner_config {
@@ -237,12 +262,17 @@ pub async fn probe(
 /// Упрощенный вызов TCP connect пробы без захвата баннера.
 #[allow(dead_code)]
 pub async fn probe_connect(ip: IpAddr, port: u16, timeout: Duration) -> ProbeOutcome {
-    probe(ip, port, timeout, None).await
+    probe(ip, port, timeout, None, None).await
 }
 
 /// Выполняет UDP пробу и преобразует результат в ProbeOutcome.
-pub async fn probe_udp(ip: IpAddr, port: u16, timeout: Duration) -> ProbeOutcome {
-    match super::udp::probe_udp(ip, port, timeout).await {
+pub async fn probe_udp(
+    ip: IpAddr,
+    port: u16,
+    timeout: Duration,
+    bind_addr: Option<IpAddr>,
+) -> ProbeOutcome {
+    match super::udp::probe_udp(ip, port, timeout, bind_addr).await {
         super::udp::UdpProbeOutcome::Open { rtt, service, .. } => ProbeOutcome::Open {
             rtt,
             banner: None,
@@ -277,11 +307,39 @@ mod tests {
                 IpAddr::from([127, 0, 0, 1]),
                 port,
                 Duration::from_secs(1),
-                None
+                None,
+                None,
             )
             .await,
             ProbeOutcome::Open { .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn detects_open_port_with_bind_addr() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        assert!(matches!(
+            probe(
+                IpAddr::from([127, 0, 0, 1]),
+                port,
+                Duration::from_secs(1),
+                None,
+                Some(IpAddr::from([127, 0, 0, 1])),
+            )
+            .await,
+            ProbeOutcome::Open { .. }
+        ));
+
+        let mismatch = probe(
+            IpAddr::from([127, 0, 0, 1]),
+            port,
+            Duration::from_secs(1),
+            None,
+            Some("::1".parse().unwrap()),
+        )
+        .await;
+        assert_eq!(mismatch, ProbeOutcome::Unreachable);
     }
 
     #[tokio::test]
@@ -295,7 +353,14 @@ mod tests {
         };
         let port = listener.local_addr().unwrap().port();
         assert!(matches!(
-            probe("::1".parse().unwrap(), port, Duration::from_secs(1), None).await,
+            probe(
+                "::1".parse().unwrap(),
+                port,
+                Duration::from_secs(1),
+                None,
+                None
+            )
+            .await,
             ProbeOutcome::Open { .. }
         ));
     }
@@ -319,6 +384,7 @@ mod tests {
                 timeout: Duration::from_millis(500),
                 max_bytes: 256,
             }),
+            None,
         )
         .await;
 
@@ -360,6 +426,7 @@ mod tests {
                 timeout: Duration::from_millis(500),
                 max_bytes: 256,
             }),
+            None,
         )
         .await;
 
@@ -398,6 +465,7 @@ mod tests {
                 timeout: Duration::from_millis(80),
                 max_bytes: 256,
             }),
+            None,
         )
         .await;
 

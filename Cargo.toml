@@ -18,6 +18,7 @@ eframe = { version = "0.37", default-features = false, features = [
 ] }
 egui = "0.37"
 egui_extras = "0.37"
+get_if_addrs = "0.5"
 ipnet = "2"
 rfd = "0.18"
 serde = { version = "1.0.229", features = ["derive"] }

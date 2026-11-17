@@ -25,9 +25,12 @@ pub struct ScanProfile {
     pub banner_timeout_ms: u64,
     #[serde(default)]
     pub protocol: crate::scanner::ScanProtocol,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bind_addr: Option<String>,
 }
 
 impl ScanProfile {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         targets: String,
         ports: String,
@@ -36,6 +39,7 @@ impl ScanProfile {
         banner_grabbing: bool,
         banner_timeout_ms: u64,
         protocol: crate::scanner::ScanProtocol,
+        bind_addr: Option<String>,
     ) -> Self {
         Self {
             version: PROFILE_VERSION,
@@ -46,6 +50,7 @@ impl ScanProfile {
             banner_grabbing,
             banner_timeout_ms,
             protocol,
+            bind_addr,
         }
     }
 
@@ -67,6 +72,14 @@ impl ScanProfile {
         }
         if !(100..=5000).contains(&self.banner_timeout_ms) {
             return Err("Banner timeout must be between 100 and 5000 ms".to_owned());
+        }
+        if let Some(bind) = &self.bind_addr
+            && !bind.trim().is_empty()
+            && !bind.trim().eq_ignore_ascii_case("default")
+            && !bind.trim().eq_ignore_ascii_case("any")
+            && bind.trim().parse::<std::net::IpAddr>().is_err()
+        {
+            return Err(format!("Invalid bind address in profile: {bind}"));
         }
         Ok(())
     }
@@ -101,6 +114,7 @@ mod tests {
             true,
             1200,
             crate::scanner::ScanProtocol::Udp,
+            Some("192.168.1.50".to_owned()),
         )
     }
 
@@ -163,6 +177,7 @@ mod tests {
                 false,
                 1000,
                 proto,
+                None,
             ),
             ScanProfile::new(
                 "127.0.0.1".to_owned(),
@@ -172,6 +187,7 @@ mod tests {
                 false,
                 1000,
                 proto,
+                None,
             ),
             ScanProfile::new(
                 "127.0.0.1".to_owned(),
@@ -181,6 +197,7 @@ mod tests {
                 false,
                 1000,
                 proto,
+                None,
             ),
             ScanProfile::new(
                 "127.0.0.1".to_owned(),
@@ -190,6 +207,7 @@ mod tests {
                 false,
                 1000,
                 proto,
+                None,
             ),
             ScanProfile::new(
                 "127.0.0.1".to_owned(),
@@ -199,6 +217,17 @@ mod tests {
                 false,
                 50,
                 proto,
+                None,
+            ),
+            ScanProfile::new(
+                "127.0.0.1".to_owned(),
+                "80".to_owned(),
+                800,
+                1,
+                false,
+                1000,
+                proto,
+                Some("999.999.999.999".to_owned()),
             ),
         ];
         for profile in invalid {

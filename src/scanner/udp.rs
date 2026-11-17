@@ -129,10 +129,31 @@ pub fn classify_udp_error(error: &std::io::Error) -> UdpProbeOutcome {
 }
 
 /// Выполняет UDP-пробу на указанный адрес и порт.
-pub async fn probe_udp(ip: IpAddr, port: u16, timeout: Duration) -> UdpProbeOutcome {
-    let bind_addr = if ip.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" };
+/// При передаче `bind_addr` связывает исходящий сокет с указанным локальным IP.
+pub async fn probe_udp(
+    ip: IpAddr,
+    port: u16,
+    timeout: Duration,
+    bind_addr: Option<IpAddr>,
+) -> UdpProbeOutcome {
+    let local_bind = match bind_addr {
+        Some(src_ip) => {
+            if src_ip.is_ipv4() == ip.is_ipv4() {
+                std::net::SocketAddr::new(src_ip, 0)
+            } else {
+                return UdpProbeOutcome::Unreachable;
+            }
+        }
+        None => {
+            if ip.is_ipv6() {
+                std::net::SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 0], 0))
+            } else {
+                std::net::SocketAddr::from(([0, 0, 0, 0], 0))
+            }
+        }
+    };
 
-    let socket = match UdpSocket::bind(bind_addr).await {
+    let socket = match UdpSocket::bind(local_bind).await {
         Ok(s) => s,
         Err(err) => return classify_udp_error(&err),
     };
@@ -194,8 +215,10 @@ mod tests {
 
         tokio::spawn(async move {
             let mut buf = [0u8; 128];
-            if let Ok((len, peer)) = server.recv_from(&mut buf).await {
-                let _ = server.send_to(&buf[..len], peer).await;
+            while let Ok((len, peer)) = server.recv_from(&mut buf).await {
+                if server.send_to(&buf[..len], peer).await.is_err() {
+                    break;
+                }
             }
         });
 
@@ -203,6 +226,7 @@ mod tests {
             IpAddr::from([127, 0, 0, 1]),
             port,
             Duration::from_millis(500),
+            None,
         )
         .await;
 
@@ -212,6 +236,26 @@ mod tests {
             }
             _ => panic!("Expected Open UDP outcome, got {outcome:?}"),
         }
+
+        // Test with explicit loopback bind
+        let outcome_bound = probe_udp(
+            IpAddr::from([127, 0, 0, 1]),
+            port,
+            Duration::from_millis(500),
+            Some(IpAddr::from([127, 0, 0, 1])),
+        )
+        .await;
+        assert!(matches!(outcome_bound, UdpProbeOutcome::Open { .. }));
+
+        // Test with IP family mismatch
+        let mismatch = probe_udp(
+            IpAddr::from([127, 0, 0, 1]),
+            port,
+            Duration::from_millis(500),
+            Some("::1".parse().unwrap()),
+        )
+        .await;
+        assert_eq!(mismatch, UdpProbeOutcome::Unreachable);
     }
 
     #[tokio::test]
@@ -229,6 +273,7 @@ mod tests {
             IpAddr::from([127, 0, 0, 1]),
             port,
             Duration::from_millis(60),
+            None,
         )
         .await;
 

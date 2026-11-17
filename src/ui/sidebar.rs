@@ -76,6 +76,69 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         });
 
         ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Network interface (Source IP)").strong());
+            if ui
+                .small_button("🔄")
+                .on_hover_text("Refresh network interfaces list")
+                .clicked()
+            {
+                app.refresh_interfaces();
+            }
+        });
+
+        let current_bind = app.bind_addr_input.trim().to_owned();
+        let selected_label = if current_bind.is_empty()
+            || current_bind.eq_ignore_ascii_case("default")
+            || current_bind.eq_ignore_ascii_case("any")
+        {
+            "Default (Operating system routing)".to_owned()
+        } else if let Some(iface) = app
+            .interfaces
+            .iter()
+            .find(|i| i.ip.to_string() == current_bind)
+        {
+            crate::scanner::interfaces::format_interface_label(iface)
+        } else {
+            format!("Custom IP: {current_bind}")
+        };
+
+        let mut chosen_bind = None;
+        egui::ComboBox::from_id_salt("bind_interface_selector")
+            .selected_text(selected_label)
+            .width(ui.available_width())
+            .show_ui(ui, |ui| {
+                let is_default = current_bind.is_empty()
+                    || current_bind.eq_ignore_ascii_case("default")
+                    || current_bind.eq_ignore_ascii_case("any");
+                if ui
+                    .selectable_label(is_default, "Default (Operating system routing)")
+                    .clicked()
+                {
+                    chosen_bind = Some(String::new());
+                }
+                for iface in &app.interfaces {
+                    let ip_str = iface.ip.to_string();
+                    let is_active = current_bind == ip_str;
+                    let label = crate::scanner::interfaces::format_interface_label(iface);
+                    if ui.selectable_label(is_active, label).clicked() {
+                        chosen_bind = Some(ip_str);
+                    }
+                }
+            });
+
+        if let Some(new_bind) = chosen_bind {
+            app.bind_addr_input = new_bind;
+        }
+
+        ui.add(
+            egui::TextEdit::singleline(&mut app.bind_addr_input)
+                .desired_width(f32::INFINITY)
+                .hint_text("Default (Any) or custom IP e.g. 192.168.1.50"),
+        )
+        .on_hover_text("Select an interface above or manually type an IP to bind outgoing sockets");
+
+        ui.add_space(8.0);
         ui.label(RichText::new("Connection timeout").strong());
         ui.add(
             egui::Slider::new(&mut app.timeout_ms, 50..=5000)

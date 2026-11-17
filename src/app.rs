@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -85,24 +86,44 @@ struct InputCache {
     targets: Result<crate::scanner::TargetList, String>,
     ports_raw: String,
     ports: Result<Vec<u16>, String>,
+    bind_addr_raw: String,
+    bind_addr: Result<Option<IpAddr>, String>,
     preview: Result<ScopePreview, String>,
 }
 
 impl InputCache {
-    fn new(targets_input: &str, ports_input: &str) -> Self {
+    fn new(targets_input: &str, ports_input: &str, bind_addr_input: &str) -> Self {
         let targets = targets::parse_targets(targets_input);
         let ports = targets::parse_ports(ports_input);
-        let preview = Self::compute_preview(&targets, &ports);
+        let bind_addr = Self::parse_bind_addr(bind_addr_input);
+        let preview = Self::compute_preview(&targets, &ports, &bind_addr);
         Self {
             targets_raw: targets_input.to_owned(),
             targets,
             ports_raw: ports_input.to_owned(),
             ports,
+            bind_addr_raw: bind_addr_input.to_owned(),
+            bind_addr,
             preview,
         }
     }
 
-    fn sync(&mut self, targets_input: &str, ports_input: &str) {
+    fn parse_bind_addr(raw: &str) -> Result<Option<IpAddr>, String> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty()
+            || trimmed.eq_ignore_ascii_case("default")
+            || trimmed.eq_ignore_ascii_case("any")
+        {
+            Ok(None)
+        } else {
+            trimmed
+                .parse::<IpAddr>()
+                .map(Some)
+                .map_err(|e| format!("Bind address: {e}"))
+        }
+    }
+
+    fn sync(&mut self, targets_input: &str, ports_input: &str, bind_addr_input: &str) {
         let mut changed = false;
         if self.targets_raw != targets_input {
             self.targets_raw.clear();
@@ -116,15 +137,25 @@ impl InputCache {
             self.ports = targets::parse_ports(ports_input);
             changed = true;
         }
+        if self.bind_addr_raw != bind_addr_input {
+            self.bind_addr_raw.clear();
+            self.bind_addr_raw.push_str(bind_addr_input);
+            self.bind_addr = Self::parse_bind_addr(bind_addr_input);
+            changed = true;
+        }
         if changed {
-            self.preview = Self::compute_preview(&self.targets, &self.ports);
+            self.preview = Self::compute_preview(&self.targets, &self.ports, &self.bind_addr);
         }
     }
 
     fn compute_preview(
         targets: &Result<crate::scanner::TargetList, String>,
         ports: &Result<Vec<u16>, String>,
+        bind_addr: &Result<Option<IpAddr>, String>,
     ) -> Result<ScopePreview, String> {
+        if let Err(err) = bind_addr {
+            return Err(err.clone());
+        }
         let (targets_len, hostnames_len) = match targets {
             Ok(list) => (list.estimated_count(), list.hostnames.len()),
             Err(err) => return Err(format!("Targets: {err}")),
@@ -161,6 +192,8 @@ pub type ScanSpawner = fn(ScanConfig) -> Result<ScanHandle, String>;
 pub struct App {
     pub targets_input: String,
     pub ports_input: String,
+    pub bind_addr_input: String,
+    pub interfaces: Vec<crate::scanner::NetworkInterfaceInfo>,
     pub timeout_ms: u64,
     pub concurrency: usize,
     pub banner_grabbing: bool,
@@ -210,11 +243,14 @@ impl App {
     pub fn default_state() -> Self {
         let targets_input = "127.0.0.1".to_owned();
         let ports_input = "22,80,443".to_owned();
-        let input_cache = InputCache::new(&targets_input, &ports_input);
+        let bind_addr_input = String::new();
+        let input_cache = InputCache::new(&targets_input, &ports_input, &bind_addr_input);
 
         Self {
             targets_input,
             ports_input,
+            bind_addr_input,
+            interfaces: crate::scanner::interfaces::list_interfaces(),
             timeout_ms: 800,
             concurrency: 256,
             banner_grabbing: false,
@@ -265,9 +301,16 @@ impl App {
         self.scan.as_ref().is_some_and(ScanHandle::is_cancelled)
     }
 
+    pub fn refresh_interfaces(&mut self) {
+        self.interfaces = crate::scanner::interfaces::list_interfaces();
+    }
+
     pub fn refresh_input_preview(&mut self) -> Result<ScopePreview, &str> {
-        self.input_cache
-            .sync(&self.targets_input, &self.ports_input);
+        self.input_cache.sync(
+            &self.targets_input,
+            &self.ports_input,
+            &self.bind_addr_input,
+        );
         self.input_cache
             .preview
             .as_ref()
@@ -291,8 +334,11 @@ impl App {
             return;
         }
 
-        self.input_cache
-            .sync(&self.targets_input, &self.ports_input);
+        self.input_cache.sync(
+            &self.targets_input,
+            &self.ports_input,
+            &self.bind_addr_input,
+        );
         let preview = match &self.input_cache.preview {
             Ok(preview) => *preview,
             Err(err) => {
@@ -314,6 +360,13 @@ impl App {
                 return;
             }
         };
+        let bind_addr = match &self.input_cache.bind_addr {
+            Ok(bind) => *bind,
+            Err(err) => {
+                self.set_status(StatusLevel::Error, err.clone());
+                return;
+            }
+        };
 
         let config = ScanConfig {
             targets,
@@ -323,6 +376,7 @@ impl App {
             banner_grabbing: self.banner_grabbing,
             banner_timeout: Duration::from_millis(self.banner_timeout_ms),
             protocol: self.protocol,
+            bind_addr,
         };
         let handle = match spawn_fn(config) {
             Ok(handle) => handle,
@@ -596,6 +650,11 @@ impl App {
     }
 
     pub fn save_profile(&mut self, path: &std::path::Path) {
+        let bind_addr = if self.bind_addr_input.trim().is_empty() {
+            None
+        } else {
+            Some(self.bind_addr_input.trim().to_owned())
+        };
         let profile = crate::profile::ScanProfile::new(
             self.targets_input.clone(),
             self.ports_input.clone(),
@@ -604,6 +663,7 @@ impl App {
             self.banner_grabbing,
             self.banner_timeout_ms,
             self.protocol,
+            bind_addr,
         );
         match crate::profile::save(path, &profile) {
             Ok(()) => {
@@ -633,7 +693,16 @@ impl App {
                 self.banner_grabbing = profile.banner_grabbing;
                 self.banner_timeout_ms = profile.banner_timeout_ms;
                 self.protocol = profile.protocol;
-                self.input_cache = InputCache::new(&self.targets_input, &self.ports_input);
+                if let Some(bind) = profile.bind_addr {
+                    self.bind_addr_input = bind;
+                } else {
+                    self.bind_addr_input.clear();
+                }
+                self.input_cache = InputCache::new(
+                    &self.targets_input,
+                    &self.ports_input,
+                    &self.bind_addr_input,
+                );
                 let file_name = path
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -1100,6 +1169,7 @@ mod tests {
             true,
             1500,
             crate::scanner::ScanProtocol::Udp,
+            None,
         );
         crate::profile::save(&path, &profile).unwrap();
         app.load_profile(&path);
@@ -1356,6 +1426,54 @@ mod tests {
         app.start_scan();
         assert_eq!(app.status_level, StatusLevel::Error);
         assert!(!app.is_running());
+    }
+
+    #[test]
+    fn bind_addr_validation_and_config_propagation() {
+        let mut app = App::default_state();
+        assert!(app.can_start_scan());
+
+        // Valid IPv4 bind address
+        app.bind_addr_input = "192.168.1.10".to_owned();
+        assert!(app.can_start_scan());
+        assert!(app.refresh_input_preview().is_ok());
+
+        // Valid IPv6 bind address
+        app.bind_addr_input = "::1".to_owned();
+        assert!(app.can_start_scan());
+
+        // Default / any keyword
+        app.bind_addr_input = "default".to_owned();
+        assert!(app.can_start_scan());
+
+        app.bind_addr_input = "  any  ".to_owned();
+        assert!(app.can_start_scan());
+
+        // Invalid IP address syntax
+        app.bind_addr_input = "999.999.999.999".to_owned();
+        assert!(!app.can_start_scan());
+        assert!(
+            app.refresh_input_preview()
+                .unwrap_err()
+                .contains("Bind address:")
+        );
+
+        app.start_scan();
+        assert_eq!(app.status_level, StatusLevel::Error);
+        assert!(!app.is_running());
+
+        // Valid bind address correctly propagated to ScanConfig
+        app.bind_addr_input = "127.0.0.1".to_owned();
+        let captured_bind = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let captured_clone = captured_bind.clone();
+        app.start_scan_with(move |cfg| {
+            *captured_clone.lock().unwrap() = cfg.bind_addr;
+            mock_infinite_scan(cfg)
+        });
+        assert_eq!(
+            *captured_bind.lock().unwrap(),
+            Some(IpAddr::from([127, 0, 0, 1]))
+        );
     }
 
     #[test]
