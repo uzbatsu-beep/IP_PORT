@@ -1052,26 +1052,17 @@ impl App {
             && let Some(index) = self.selected_result
             && let Some(result) = self.results.get(index)
         {
-            match result.port {
-                80 | 8000 | 8008 | 8080 | 8081 | 8200 | 8888 | 443 | 8443 => {
-                    let scheme = if result.port == 443 || result.port == 8443 {
-                        "https"
-                    } else {
-                        "http"
-                    };
-                    let host = if result.ip.is_ipv6() {
-                        format!("[{}]", result.ip)
-                    } else {
-                        result.ip.to_string()
-                    };
-                    let url = format!("{scheme}://{host}:{}", result.port);
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(url));
-                    self.show_toast(format!("Opened {}:{} in browser", result.ip, result.port));
-                }
-                _ => {
-                    let text = format!("{}:{}", result.ip, result.port);
-                    self.copy_text_with_toast(ui.ctx(), text.clone(), format!("Copied {text}"));
-                }
+            if let Some(url) = crate::ui::quick_actions::web_url_for(
+                result.ip,
+                result.port,
+                result.service,
+                result.banner.as_deref(),
+            ) {
+                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                self.show_toast(format!("Opened {}:{} in browser", result.ip, result.port));
+            } else {
+                let text = format!("{}:{}", result.ip, result.port);
+                self.copy_text_with_toast(ui.ctx(), text.clone(), format!("Copied {text}"));
             }
         }
 

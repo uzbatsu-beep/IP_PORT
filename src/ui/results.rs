@@ -231,118 +231,15 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     row.response()
                         .on_hover_text("Right-click for quick actions")
                         .context_menu(|ui| {
-                            let cmd = crate::ui::cmd_key_name();
-                            let proto = entry.raw.protocol.as_str();
-                            if ui
-                                .button(format!("Copy IP:Port ({proto})      ({cmd}+C)"))
-                                .clicked()
-                            {
-                                let text = format!("{}:{}", entry.ip_text, entry.port_text);
-                                app.copy_text_with_toast(
-                                    ui.ctx(),
-                                    text.clone(),
-                                    format!("Copied {text}"),
-                                );
-                                ui.close();
-                            }
-                            if ui.button("Copy IP").clicked() {
-                                let text = entry.ip_text.clone();
-                                app.copy_text_with_toast(
-                                    ui.ctx(),
-                                    text.clone(),
-                                    format!("Copied IP {text}"),
-                                );
-                                ui.close();
-                            }
-                            if let Some(banner) = &entry.raw.banner
-                                && ui.button("Copy banner").clicked()
-                            {
-                                app.copy_text_with_toast(
-                                    ui.ctx(),
-                                    banner.clone(),
-                                    format!(
-                                        "Copied banner for {}:{}",
-                                        entry.ip_text, entry.port_text
-                                    ),
-                                );
-                                ui.close();
-                            }
-                            if ui.button("Copy row").clicked() {
-                                let text = if let Some(banner) = &entry.raw.banner {
-                                    format!(
-                                        "{}\t{}\t{}\t{}\t{}",
-                                        entry.ip_text,
-                                        entry.port_text,
-                                        entry.raw.service,
-                                        entry.latency_text,
-                                        banner
-                                    )
-                                } else {
-                                    format!(
-                                        "{}\t{}\t{}\t{}",
-                                        entry.ip_text,
-                                        entry.port_text,
-                                        entry.raw.service,
-                                        entry.latency_text
-                                    )
-                                };
-                                app.copy_text_with_toast(
-                                    ui.ctx(),
-                                    text,
-                                    format!("Copied row {}:{}", entry.ip_text, entry.port_text),
-                                );
-                                ui.close();
-                            }
-                            if ui.button("Copy all results").clicked() {
-                                let all_results = app
-                                    .results
-                                    .iter()
-                                    .map(|result| {
-                                        format!(
-                                            "{}:{}\t{}\t{:.2} ms",
-                                            result.ip,
-                                            result.port,
-                                            result.service,
-                                            result.rtt.as_secs_f64() * 1000.0
-                                        )
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join("\n");
-                                let count = app.results.len();
-                                app.copy_text_with_toast(
-                                    ui.ctx(),
-                                    all_results,
-                                    format!(
-                                        "Copied {count} result{}",
-                                        if count == 1 { "" } else { "s" }
-                                    ),
-                                );
-                                ui.close();
-                            }
-                            let browser_host = if entry.ip_text.contains(':') {
-                                format!("[{}]", entry.ip_text)
-                            } else {
-                                entry.ip_text.clone()
-                            };
-                            let browser_url = match entry.raw.port {
-                                80 | 8000 | 8008 | 8080 | 8081 | 8200 | 8888 => {
-                                    Some(format!("http://{browser_host}:{}", entry.raw.port))
-                                }
-                                443 | 8443 => {
-                                    Some(format!("https://{browser_host}:{}", entry.raw.port))
-                                }
-                                _ => None,
-                            };
-                            if let Some(url) = browser_url
-                                && ui.button("Open in browser    (Enter)").clicked()
-                            {
-                                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
-                                ui.close();
-                            }
+                            crate::ui::quick_actions::show_row_context_menu(app, &entry, ui);
                         });
                 });
             });
     });
+
+    if let Some(selected_idx) = app.selected_result {
+        crate::ui::quick_actions::show_inspector_toolbar(app, selected_idx, ui);
+    }
 
     if app.sort_column != sort_column || app.sort_ascending != sort_ascending {
         app.sort_column = sort_column;

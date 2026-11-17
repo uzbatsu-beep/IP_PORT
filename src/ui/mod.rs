@@ -1,3 +1,4 @@
+pub mod quick_actions;
 pub mod results;
 pub mod rtt_view;
 pub mod sidebar;
