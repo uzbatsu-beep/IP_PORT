@@ -161,6 +161,395 @@ fn write_json_string(out: &mut impl Write, value: &str) -> io::Result<()> {
     out.write_all(b"\"")
 }
 
+/// Экранирует спецсимволы HTML для безопасного вывода в отчёте.
+pub fn escape_html(input: &str) -> String {
+    let mut escaped = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+/// Сохраняет результаты в красивый интерактивный автономный HTML-отчёт.
+pub fn save_html(path: &Path, results: &[ScanResult]) -> io::Result<()> {
+    let file = std::fs::File::create(path)?;
+    let mut out = BufWriter::new(file);
+
+    let total = results.len();
+    let mut unique_ips: Vec<std::net::IpAddr> = results.iter().map(|r| r.ip).collect();
+    unique_ips.sort();
+    unique_ips.dedup();
+    let unique_hosts_count = unique_ips.len();
+
+    let mut latencies: Vec<f64> = results
+        .iter()
+        .map(|r| r.rtt.as_secs_f64() * 1000.0)
+        .collect();
+    latencies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let min_rtt = latencies.first().copied().unwrap_or(0.0);
+    let max_rtt = latencies.last().copied().unwrap_or(0.0);
+    let avg_rtt = if total > 0 {
+        latencies.iter().sum::<f64>() / total as f64
+    } else {
+        0.0
+    };
+
+    let tcp_count = results
+        .iter()
+        .filter(|r| r.protocol == crate::scanner::ScanProtocol::Tcp)
+        .count();
+    let udp_count = results
+        .iter()
+        .filter(|r| r.protocol == crate::scanner::ScanProtocol::Udp)
+        .count();
+
+    writeln!(out, "<!DOCTYPE html>")?;
+    writeln!(out, "<html lang=\"en\">")?;
+    writeln!(out, "<head>")?;
+    writeln!(out, "  <meta charset=\"utf-8\">")?;
+    writeln!(
+        out,
+        "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+    )?;
+    writeln!(out, "  <title>IP / PORT Scanner Report</title>")?;
+    writeln!(out, "  <style>")?;
+    writeln!(out, "    :root {{")?;
+    writeln!(
+        out,
+        "      --bg: #121316; --card: #1a1c23; --card-hover: #222530; --border: #2d3139;"
+    )?;
+    writeln!(
+        out,
+        "      --text: #e2e8f0; --muted: #94a3b8; --accent: #10b981; --accent-light: #34d399;"
+    )?;
+    writeln!(
+        out,
+        "      --warn: #f59e0b; --danger: #ef4444; --code-bg: #0d0e11;"
+    )?;
+    writeln!(
+        out,
+        "      --font: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;"
+    )?;
+    writeln!(out, "    }}")?;
+    writeln!(
+        out,
+        "    * {{ box-sizing: border-box; margin: 0; padding: 0; }}"
+    )?;
+    writeln!(
+        out,
+        "    body {{ background: var(--bg); color: var(--text); font-family: var(--font); padding: 24px; line-height: 1.5; }}"
+    )?;
+    writeln!(
+        out,
+        "    .container {{ max-width: 1200px; margin: 0 auto; }}"
+    )?;
+    writeln!(
+        out,
+        "    header {{ display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 24px; }}"
+    )?;
+    writeln!(
+        out,
+        "    h1 {{ font-size: 1.5rem; font-weight: 700; color: #fff; }}"
+    )?;
+    writeln!(
+        out,
+        "    .subtitle {{ font-size: 0.875rem; color: var(--muted); }}"
+    )?;
+    writeln!(
+        out,
+        "    .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }}"
+    )?;
+    writeln!(
+        out,
+        "    .card {{ background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }}"
+    )?;
+    writeln!(
+        out,
+        "    .card-title {{ font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 4px; }}"
+    )?;
+    writeln!(
+        out,
+        "    .card-val {{ font-size: 1.5rem; font-weight: 700; color: #fff; }}"
+    )?;
+    writeln!(
+        out,
+        "    .toolbar {{ display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }}"
+    )?;
+    writeln!(
+        out,
+        "    .search {{ flex: 1; min-width: 260px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text); font-size: 0.875rem; outline: none; }}"
+    )?;
+    writeln!(out, "    .search:focus {{ border-color: var(--accent); }}")?;
+    writeln!(
+        out,
+        "    .btn-group {{ display: flex; gap: 4px; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 2px; }}"
+    )?;
+    writeln!(
+        out,
+        "    .filter-btn {{ background: transparent; border: none; border-radius: 4px; padding: 6px 12px; color: var(--muted); font-size: 0.75rem; font-weight: 600; cursor: pointer; }}"
+    )?;
+    writeln!(
+        out,
+        "    .filter-btn.active, .filter-btn:hover {{ background: #2a2e3d; color: #fff; }}"
+    )?;
+    writeln!(
+        out,
+        "    table {{ width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }}"
+    )?;
+    writeln!(
+        out,
+        "    th {{ background: #161820; text-align: left; padding: 12px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }}"
+    )?;
+    writeln!(out, "    th:hover {{ color: #fff; }}")?;
+    writeln!(
+        out,
+        "    td {{ padding: 10px 12px; font-size: 0.875rem; border-bottom: 1px solid var(--border); }}"
+    )?;
+    writeln!(out, "    tr:hover td {{ background: var(--card-hover); }}")?;
+    writeln!(
+        out,
+        "    .mono {{ font-family: monospace; font-size: 0.85rem; }}"
+    )?;
+    writeln!(
+        out,
+        "    .badge {{ display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }}"
+    )?;
+    writeln!(
+        out,
+        "    .badge-open {{ background: rgba(16, 185, 129, 0.2); color: #34d399; }}"
+    )?;
+    writeln!(
+        out,
+        "    .badge-filtered {{ background: rgba(245, 158, 11, 0.2); color: #fbbf24; }}"
+    )?;
+    writeln!(
+        out,
+        "    .badge-verified {{ color: #10b981; font-weight: bold; margin-right: 4px; }}"
+    )?;
+    writeln!(
+        out,
+        "    .banner {{ color: var(--muted); font-size: 0.8rem; margin-top: 2px; }}"
+    )?;
+    writeln!(
+        out,
+        "    footer {{ text-align: center; color: var(--muted); font-size: 0.75rem; margin-top: 32px; }}"
+    )?;
+    writeln!(out, "  </style>")?;
+    writeln!(out, "</head>")?;
+    writeln!(out, "<body>")?;
+    writeln!(out, "  <div class=\"container\">")?;
+    writeln!(out, "    <header>")?;
+    writeln!(out, "      <div>")?;
+    writeln!(out, "        <h1>🔍 IP / PORT Scanner Report</h1>")?;
+    writeln!(
+        out,
+        "        <div class=\"subtitle\">Generated by IP / PORT Scanner v0.2.0</div>"
+    )?;
+    writeln!(out, "      </div>")?;
+    writeln!(out, "      <div class=\"subtitle\">{} results</div>", total)?;
+    writeln!(out, "    </header>")?;
+
+    // Сводные карточки
+    writeln!(out, "    <div class=\"cards\">")?;
+    writeln!(
+        out,
+        "      <div class=\"card\"><div class=\"card-title\">Total Open Ports</div><div class=\"card-val\">{}</div></div>",
+        total
+    )?;
+    writeln!(
+        out,
+        "      <div class=\"card\"><div class=\"card-title\">Unique Hosts</div><div class=\"card-val\">{}</div></div>",
+        unique_hosts_count
+    )?;
+    writeln!(
+        out,
+        "      <div class=\"card\"><div class=\"card-title\">Protocols</div><div class=\"card-val\">{} TCP / {} UDP</div></div>",
+        tcp_count, udp_count
+    )?;
+    writeln!(
+        out,
+        "      <div class=\"card\"><div class=\"card-title\">Latency (Min / Avg / Max)</div><div class=\"card-val\">{:.1} / {:.1} / {:.1} ms</div></div>",
+        min_rtt, avg_rtt, max_rtt
+    )?;
+    writeln!(out, "    </div>")?;
+
+    // Панель фильтров
+    writeln!(out, "    <div class=\"toolbar\">")?;
+    writeln!(
+        out,
+        "      <input type=\"text\" id=\"search\" class=\"search\" placeholder=\"Search IP, port, service, banner...\" oninput=\"filterRows()\">"
+    )?;
+    writeln!(out, "      <div class=\"btn-group\">")?;
+    writeln!(
+        out,
+        "        <button class=\"filter-btn active\" id=\"btn-all\" onclick=\"setProto('all')\">All ({total})</button>"
+    )?;
+    writeln!(
+        out,
+        "        <button class=\"filter-btn\" id=\"btn-tcp\" onclick=\"setProto('tcp')\">TCP ({tcp_count})</button>"
+    )?;
+    writeln!(
+        out,
+        "        <button class=\"filter-btn\" id=\"btn-udp\" onclick=\"setProto('udp')\">UDP ({udp_count})</button>"
+    )?;
+    writeln!(out, "      </div>")?;
+    writeln!(out, "    </div>")?;
+
+    // Таблица результатов
+    writeln!(out, "    <table id=\"results\">")?;
+    writeln!(out, "      <thead>")?;
+    writeln!(out, "        <tr>")?;
+    writeln!(out, "          <th onclick=\"sortTable(0)\">Address ↕</th>")?;
+    writeln!(out, "          <th onclick=\"sortTable(1)\">Port ↕</th>")?;
+    writeln!(
+        out,
+        "          <th onclick=\"sortTable(2)\">Protocol ↕</th>"
+    )?;
+    writeln!(out, "          <th onclick=\"sortTable(3)\">State ↕</th>")?;
+    writeln!(out, "          <th onclick=\"sortTable(4)\">Service ↕</th>")?;
+    writeln!(out, "          <th onclick=\"sortTable(5)\">Latency ↕</th>")?;
+    writeln!(out, "        </tr>")?;
+    writeln!(out, "      </thead>")?;
+    writeln!(out, "      <tbody>")?;
+
+    for res in results {
+        let ip_esc = escape_html(&res.ip.to_string());
+        let port = res.port;
+        let proto = res.protocol.as_str();
+        let state = res.state.as_str();
+        let state_class = match res.state {
+            crate::scanner::PortState::Open => "badge-open",
+            crate::scanner::PortState::OpenFiltered => "badge-filtered",
+        };
+        let svc_esc = escape_html(res.service);
+        let verified_mark = if res.service_verified {
+            "<span class=\"badge-verified\" title=\"Service confirmed by banner\">✔</span>"
+        } else {
+            ""
+        };
+        let banner_html = if let Some(b) = &res.banner {
+            format!("<div class=\"banner\">{}</div>", escape_html(b))
+        } else {
+            String::new()
+        };
+        let rtt_ms = res.rtt.as_secs_f64() * 1000.0;
+
+        writeln!(
+            out,
+            "        <tr data-proto=\"{}\">",
+            proto.to_ascii_lowercase()
+        )?;
+        writeln!(out, "          <td class=\"mono\">{}</td>", ip_esc)?;
+        writeln!(out, "          <td class=\"mono\">{}</td>", port)?;
+        writeln!(out, "          <td>{}</td>", proto)?;
+        writeln!(
+            out,
+            "          <td><span class=\"badge {}\">{}</span></td>",
+            state_class, state
+        )?;
+        writeln!(
+            out,
+            "          <td>{}{}{}</td>",
+            verified_mark, svc_esc, banner_html
+        )?;
+        writeln!(out, "          <td class=\"mono\">{:.2} ms</td>", rtt_ms)?;
+        writeln!(out, "        </tr>")?;
+    }
+
+    writeln!(out, "      </tbody>")?;
+    writeln!(out, "    </table>")?;
+    writeln!(
+        out,
+        "    <footer>Generated by IP / PORT Scanner · Standalone Offline Report</footer>"
+    )?;
+
+    // Встроенный JavaScript для фильтрации и сортировки
+    writeln!(out, "    <script>")?;
+    writeln!(out, "      let currentProto = 'all';")?;
+    writeln!(out, "      function setProto(p) {{")?;
+    writeln!(out, "        currentProto = p;")?;
+    writeln!(
+        out,
+        "        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));"
+    )?;
+    writeln!(
+        out,
+        "        document.getElementById('btn-' + p).classList.add('active');"
+    )?;
+    writeln!(out, "        filterRows();")?;
+    writeln!(out, "      }}")?;
+    writeln!(out, "      function filterRows() {{")?;
+    writeln!(
+        out,
+        "        const q = document.getElementById('search').value.toLowerCase();"
+    )?;
+    writeln!(
+        out,
+        "        const rows = document.querySelectorAll('#results tbody tr');"
+    )?;
+    writeln!(out, "        rows.forEach(r => {{")?;
+    writeln!(out, "          const p = r.getAttribute('data-proto');")?;
+    writeln!(
+        out,
+        "          const protoMatch = (currentProto === 'all' || p === currentProto);"
+    )?;
+    writeln!(
+        out,
+        "          const textMatch = !q || r.innerText.toLowerCase().includes(q);"
+    )?;
+    writeln!(
+        out,
+        "          r.style.display = (protoMatch && textMatch) ? '' : 'none';"
+    )?;
+    writeln!(out, "        }});")?;
+    writeln!(out, "      }}")?;
+    writeln!(out, "      let sortAsc = true, lastCol = -1;")?;
+    writeln!(out, "      function sortTable(n) {{")?;
+    writeln!(
+        out,
+        "        const table = document.getElementById('results');"
+    )?;
+    writeln!(out, "        const tbody = table.querySelector('tbody');")?;
+    writeln!(
+        out,
+        "        const rows = Array.from(tbody.querySelectorAll('tr'));"
+    )?;
+    writeln!(out, "        sortAsc = (lastCol === n) ? !sortAsc : true;")?;
+    writeln!(out, "        lastCol = n;")?;
+    writeln!(out, "        rows.sort((a, b) => {{")?;
+    writeln!(out, "          let valA = a.children[n].innerText.trim();")?;
+    writeln!(out, "          let valB = b.children[n].innerText.trim();")?;
+    writeln!(
+        out,
+        "          let numA = parseFloat(valA), numB = parseFloat(valB);"
+    )?;
+    writeln!(
+        out,
+        "          if (!isNaN(numA) && !isNaN(numB)) return sortAsc ? numA - numB : numB - numA;"
+    )?;
+    writeln!(
+        out,
+        "          return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);"
+    )?;
+    writeln!(out, "        }});")?;
+    writeln!(out, "        rows.forEach(r => tbody.appendChild(r));")?;
+    writeln!(out, "      }}")?;
+    writeln!(out, "    </script>")?;
+    writeln!(out, "  </div>")?;
+    writeln!(out, "</body>")?;
+    writeln!(out, "</html>")?;
+
+    out.flush()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,5 +706,34 @@ mod tests {
         assert_eq!(parsed[1].get("banner"), None);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn writes_html_report_and_escapes_html() {
+        let dir = std::env::temp_dir().join("ip_port_scanner_html_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let html_path = dir.join("report.html");
+
+        let mut item = ScanResult::new(
+            "192.168.1.100".parse::<IpAddr>().unwrap(),
+            8080,
+            "<custom & dangerous>",
+            Duration::from_millis(25),
+        );
+        item.banner = Some("Server: Test <script>alert(1)</script>".to_owned());
+        item.service_verified = true;
+
+        save_html(&html_path, &[item]).unwrap();
+        let content = std::fs::read_to_string(&html_path).unwrap();
+
+        assert!(content.contains("<!DOCTYPE html>"));
+        assert!(content.contains("192.168.1.100"));
+        assert!(content.contains("8080"));
+        assert!(content.contains("&lt;custom &amp; dangerous&gt;"));
+        assert!(content.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!content.contains("<script>alert(1)</script>"));
+        assert!(content.contains("Total Open Ports"));
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

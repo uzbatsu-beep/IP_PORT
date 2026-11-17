@@ -305,9 +305,17 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     app.export_json();
                     ui.close();
                 }
+                if ui
+                    .button("Export HTML report...")
+                    .on_hover_text(format!("{export_hint} as interactive HTML report"))
+                    .clicked()
+                {
+                    app.export_html();
+                    ui.close();
+                }
             })
             .response
-            .on_hover_text(format!("{export_hint} (CSV / JSON)"));
+            .on_hover_text(format!("{export_hint} (CSV / JSON / HTML)"));
         });
     });
 
