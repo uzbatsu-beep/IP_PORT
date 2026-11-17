@@ -1420,6 +1420,47 @@ mod tests {
     }
 
     #[test]
+    fn port_presets_interaction_and_protocol_switching() {
+        let mut app = App::default_state();
+        let ctx = egui::Context::default();
+        crate::ui::theme::apply(&ctx);
+
+        // 1. Initial default is TCP, ports 22,80,443
+        assert_eq!(app.protocol, ScanProtocol::Tcp);
+        let preview = app.refresh_input_preview().unwrap();
+        assert_eq!(preview.ports, 3);
+
+        // 2. Apply Top 100 preset
+        let top100 = crate::scanner::presets::TCP_PRESETS
+            .iter()
+            .find(|p| p.name == "Top 100")
+            .unwrap();
+        app.ports_input = top100.ports.to_owned();
+        let preview_top100 = app.refresh_input_preview().unwrap();
+        assert_eq!(preview_top100.ports, 100);
+
+        // 3. Switch to UDP protocol
+        app.protocol = ScanProtocol::Udp;
+        let udp_presets = crate::scanner::presets::presets_for_protocol(app.protocol);
+        assert_eq!(
+            udp_presets.len(),
+            crate::scanner::presets::UDP_PRESETS.len()
+        );
+        assert!(udp_presets.iter().any(|p| p.name == "Common UDP"));
+
+        // 4. Merge/append another preset (Common UDP + Discovery)
+        let common_udp = udp_presets.iter().find(|p| p.name == "Common UDP").unwrap();
+        let discovery = udp_presets.iter().find(|p| p.name == "Discovery").unwrap();
+        let merged = crate::scanner::presets::apply_preset(common_udp.ports, discovery.ports, true);
+        app.ports_input = merged;
+        let preview_udp = app.refresh_input_preview().unwrap();
+        assert!(preview_udp.ports >= 15);
+
+        // 5. Render a frame to ensure no panic in sidebar
+        run_headless_frame(&mut app, &ctx, egui::vec2(1180.0, 760.0), 1.0, vec![]);
+    }
+
+    #[test]
     fn keyboard_navigation_and_shortcuts_test() {
         let mut app = App::default_state();
         app.set_spawner(mock_infinite_scan);

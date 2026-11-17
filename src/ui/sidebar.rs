@@ -1,24 +1,8 @@
 use egui::{RichText, Ui};
 
 use crate::app::{App, ScopePreview, StatusLevel};
+use crate::scanner::presets;
 use crate::ui::theme;
-
-const PRESETS: &[(&str, &str)] = &[
-    ("Common", "21,22,23,25,53,80,110,139,143,443,445,3389"),
-    ("Web", "80,443,3000,5000,8000,8080,8081,8443,8888"),
-    ("Database", "1433,1521,3306,5432,6379,9042,11211,27017"),
-    ("Remote", "22,23,3389,5900,5985,5986"),
-];
-
-fn ports_input_matches(input: &str, ports: &str) -> bool {
-    match (
-        crate::scanner::targets::parse_ports(input),
-        crate::scanner::targets::parse_ports(ports),
-    ) {
-        (Ok(input), Ok(ports)) => input == ports,
-        _ => false,
-    }
-}
 
 pub fn show(app: &mut App, ui: &mut Ui) {
     ui.add_space(4.0);
@@ -74,15 +58,19 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         );
 
         ui.horizontal_wrapped(|ui| {
-            for (label, ports) in PRESETS {
-                let active = ports_input_matches(&app.ports_input, ports);
-                let button = egui::Button::new(*label).selected(active);
-                if ui
-                    .add(button)
-                    .on_hover_text(format!("Ports: {ports}"))
-                    .clicked()
-                {
-                    app.ports_input = (*ports).to_owned();
+            let active_presets = presets::presets_for_protocol(app.protocol);
+            let append_mode = ui.input(|i| i.modifiers.command || i.modifiers.ctrl || i.modifiers.shift);
+            for preset in active_presets {
+                let active = presets::ports_input_matches(&app.ports_input, preset.ports);
+                let button = egui::Button::new(preset.name).selected(active);
+                let tooltip = format!(
+                    "{}\n\nPorts ({}):\n{}\n\nTip: Hold Ctrl or Shift to append without replacing",
+                    preset.description,
+                    preset.count,
+                    preset.ports
+                );
+                if ui.add(button).on_hover_text(tooltip).clicked() {
+                    app.ports_input = presets::apply_preset(&app.ports_input, preset.ports, append_mode);
                 }
             }
         });
