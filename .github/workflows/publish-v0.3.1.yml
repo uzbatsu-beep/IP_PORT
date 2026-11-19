@@ -1,0 +1,56 @@
+# One-time release orchestration. Runs only from release/publish-v0.3.1.
+# The published tag must reference the already-tested merge commit on main.
+name: Publish v0.3.1 tag
+on:
+  push:
+    branches:
+      - release/publish-v0.3.1
+    paths:
+      - .github/workflows/publish-v0.3.1.yml
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  tag-and-dispatch:
+    runs-on: ubuntu-latest
+    env:
+      TAG: v0.3.1
+      EXPECTED_SHA: 4f3ca1c15b2ae42b8699f275e0864c1699b1cf39
+    steps:
+      - name: Check out the verified main commit
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify main, version and absence of tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$EXPECTED_SHA"
+          grep -q '^version = "0.3.1"$' Cargo.toml
+          if git ls-remote --tags --exit-code origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists; not changing any release tags."
+            exit 1
+          fi
+
+      - name: Create immutable annotated release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$EXPECTED_SHA" -m "IP / PORT Scanner $TAG"
+          git push origin "refs/tags/$TAG"
+
+      - name: Dispatch release workflow on exact tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+          echo "Dispatched release.yml on refs/tags/$TAG"
