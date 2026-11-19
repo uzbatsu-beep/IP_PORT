@@ -813,6 +813,9 @@ impl App {
                     "json" => {
                         crate::export::save_json_enriched(&path_for_task, &snapshot, &host_metadata)
                     }
+                    "html" if host_metadata.is_empty() => {
+                        crate::export::save_html(&path_for_task, &snapshot)
+                    }
                     "html" => {
                         crate::export::save_html_enriched(&path_for_task, &snapshot, &host_metadata)
                     }
