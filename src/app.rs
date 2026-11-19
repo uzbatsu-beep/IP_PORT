@@ -620,7 +620,12 @@ impl App {
         let query_lower = self.results_filter.trim().to_ascii_lowercase();
         self.visible_indices.clear();
         for (idx, row) in self.rows.iter().enumerate() {
-            if row.matches_lowercase_query(&query_lower) {
+            let info_matches = self.host_info.get(&row.raw.ip).is_some_and(|info| {
+                info.hostname.as_deref().is_some_and(|value| contains_ascii_case_insensitive(value, &query_lower))
+                    || info.mac.as_deref().is_some_and(|value| contains_ascii_case_insensitive(value, &query_lower))
+                    || info.vendor.as_deref().is_some_and(|value| contains_ascii_case_insensitive(value, &query_lower))
+            });
+            if row.matches_lowercase_query(&query_lower) || info_matches {
                 self.visible_indices.push(idx);
             }
         }
