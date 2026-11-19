@@ -743,7 +743,11 @@ mod tests {
         save_csv(&csv, &items).unwrap();
         save_json(&json, &items).unwrap();
         save_html(&html, &items).unwrap();
-        assert!(std::fs::read_to_string(&csv).unwrap().contains("127.0.0.1,161,snmp,\n"));
+        assert!(
+            std::fs::read_to_string(&csv)
+                .unwrap()
+                .contains("127.0.0.1,161,snmp,\n")
+        );
         let parsed: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&json).unwrap()).unwrap();
         assert!(parsed[0]["rtt_ms"].is_null());
