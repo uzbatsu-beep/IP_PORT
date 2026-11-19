@@ -27,6 +27,12 @@ pub struct ScanProfile {
     pub protocol: crate::scanner::ScanProtocol,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bind_addr: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub exclusions: String,
+    #[serde(default)]
+    pub resolve_ptr: bool,
+    #[serde(default)]
+    pub read_neighbor_cache: bool,
 }
 
 impl ScanProfile {
@@ -51,6 +57,9 @@ impl ScanProfile {
             banner_timeout_ms,
             protocol,
             bind_addr,
+            exclusions: String::new(),
+            resolve_ptr: false,
+            read_neighbor_cache: false,
         }
     }
 
@@ -64,6 +73,13 @@ impl ScanProfile {
         targets::parse_targets(&self.targets)
             .map_err(|error| format!("Invalid targets: {error}"))?;
         targets::parse_ports(&self.ports).map_err(|error| format!("Invalid ports: {error}"))?;
+        let excluded = crate::scanner::scope::Exclusions::parse(&self.exclusions)
+            .map_err(|error| format!("Invalid exclusions: {error}"))?;
+        let targets = targets::parse_targets(&self.targets)
+            .map_err(|error| format!("Invalid targets: {error}"))?;
+        if targets.hostnames.is_empty() && targets.ips.iter().all(|ip| excluded.contains(ip)) {
+            return Err("All targets are excluded from scan scope".to_owned());
+        }
         if !(50..=5000).contains(&self.timeout_ms) {
             return Err("Timeout must be between 50 and 5000 ms".to_owned());
         }
@@ -137,6 +153,9 @@ mod tests {
         .unwrap();
         let loaded = load(&path).unwrap();
         assert!(!loaded.banner_grabbing);
+        assert!(loaded.exclusions.is_empty());
+        assert!(!loaded.resolve_ptr);
+        assert!(!loaded.read_neighbor_cache);
         assert_eq!(loaded.banner_timeout_ms, 1000);
         assert_eq!(loaded.protocol, crate::scanner::ScanProtocol::Tcp);
         let _ = std::fs::remove_file(path);
