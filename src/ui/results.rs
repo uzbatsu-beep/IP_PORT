@@ -72,7 +72,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     });
     ui.separator();
 
-    if let Some(stats) = crate::ui::rtt_view::calculate_rtt_stats(&app.results) {
+    if let Some(stats) = app.current_rtt_stats() {
         let header_title = format!(
             "Latency distribution — Min: {:.2} ms | Avg: {:.2} ms | Median: {:.2} ms | Max: {:.2} ms",
             stats.min_ms, stats.avg_ms, stats.median_ms, stats.max_ms
