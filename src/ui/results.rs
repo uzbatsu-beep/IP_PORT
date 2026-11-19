@@ -295,14 +295,18 @@ fn render_grouped_by_host(app: &mut App, ui: &mut Ui) {
         .show(ui, |ui| {
             let host_groups = app.host_groups().to_vec();
             for group in &host_groups {
-                let rtt_ms = group.min_rtt.as_secs_f64() * 1000.0;
+                let latency_text = if group.has_measured_rtt {
+                    format!("{:.2} ms", group.min_rtt.as_secs_f64() * 1000.0)
+                } else {
+                    "N/A".to_owned()
+                };
                 let header_title = format!(
-                    "🖥  {} — {} port{} ({}) · {:.2} ms",
+                    "🖥  {} — {} port{} ({}) · {}",
                     group.ip_text,
                     group.ports_count,
                     if group.ports_count == 1 { "" } else { "s" },
                     group.services_summary,
-                    rtt_ms
+                    latency_text
                 );
 
                 egui::CollapsingHeader::new(RichText::new(header_title).strong())
