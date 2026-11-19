@@ -299,7 +299,12 @@ pub async fn resolve_targets_with_cancel(
         }
 
         let lookup = tokio::net::lookup_host((hostname.as_str(), 0));
-        let addrs = match tokio::time::timeout(timeout, lookup).await {
+        let lookup_result = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Ok(None),
+            result = tokio::time::timeout(timeout, lookup) => result,
+        };
+        let addrs = match lookup_result {
             Ok(Ok(iter)) => iter,
             Ok(Err(err)) => {
                 return Err(format!("Failed to resolve hostname '{hostname}': {err}"));
