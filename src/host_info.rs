@@ -33,7 +33,7 @@ impl HostInfoWorker {
                 .name(format!("host-enrichment-{worker_idx}"))
                 .spawn(move || {
                     let mut neighbors = HashMap::new();
-                    let mut last_refresh = Instant::now() - Duration::from_secs(60);
+                    let mut last_refresh: Option<Instant> = None;
                     loop {
                         let ip = {
                             let Ok(queue) = requests.lock() else { break };
@@ -47,9 +47,9 @@ impl HostInfoWorker {
                         } else {
                             None
                         };
-                        if neighbor_cache && last_refresh.elapsed() >= Duration::from_secs(3) {
+                        if neighbor_cache && last_refresh.is_none_or(|last| last.elapsed() >= Duration::from_secs(3)) {
                             neighbors = read_neighbor_cache();
-                            last_refresh = Instant::now();
+                            last_refresh = Some(Instant::now());
                         }
                         let mac = if neighbor_cache { neighbors.get(&ip).cloned() } else { None };
                         let oui = mac.as_deref().and_then(oui_prefix);
