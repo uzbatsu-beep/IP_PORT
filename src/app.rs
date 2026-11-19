@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use crate::scanner::targets;
 use crate::scanner::{
-    self, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
+    self, PortState, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
 };
 use crate::ui;
 
@@ -36,17 +36,19 @@ pub struct HostGroup {
     pub ports_count: usize,
     pub services_summary: String,
     pub min_rtt: Duration,
+    pub has_measured_rtt: bool,
 }
 
 impl HostGroup {
     pub fn build(ip: IpAddr, indices: Vec<usize>, rows: &[ResultRow]) -> Self {
         let ip_text = ip.to_string();
         let ports_count = indices.len();
-        let min_rtt = indices
+        let confirmed_rtt = indices
             .iter()
+            .filter(|&&idx| rows[idx].raw.state == PortState::Open)
             .map(|&idx| rows[idx].raw.rtt)
-            .min()
-            .unwrap_or_default();
+            .min();
+        let min_rtt = confirmed_rtt.unwrap_or_default();
 
         let mut distinct_services: Vec<&str> = Vec::new();
         for &idx in &indices {
@@ -75,6 +77,7 @@ impl HostGroup {
             ports_count,
             services_summary,
             min_rtt,
+            has_measured_rtt: confirmed_rtt.is_some(),
         }
     }
 }
@@ -113,7 +116,11 @@ impl ResultRow {
         let port_text = raw.port.to_string();
         let protocol_text = raw.protocol.as_str();
         let state_text = raw.state.as_str();
-        let latency_text = format!("{:.2} ms", raw.rtt.as_secs_f64() * 1000.0);
+        let latency_text = if raw.state == PortState::OpenFiltered {
+            "—".to_owned()
+        } else {
+            format!("{:.2} ms", raw.rtt.as_secs_f64() * 1000.0)
+        };
         Self {
             raw,
             ip_text,
@@ -279,6 +286,8 @@ pub struct App {
     rows: Vec<ResultRow>,
     visible_indices: Vec<usize>,
     host_groups: Vec<HostGroup>,
+    cached_rtt_stats: Option<crate::ui::rtt_view::RttStats>,
+    rtt_stats_dirty: bool,
     cached_filter: String,
     cached_sort_column: SortColumn,
     cached_sort_ascending: bool,
@@ -335,6 +344,8 @@ impl App {
             rows: Vec::new(),
             visible_indices: Vec::new(),
             host_groups: Vec::new(),
+            cached_rtt_stats: None,
+            rtt_stats_dirty: true,
             cached_filter: String::new(),
             cached_sort_column: SortColumn::Address,
             cached_sort_ascending: true,
@@ -501,6 +512,7 @@ impl App {
         self.rows.push(ResultRow::from_result(result.clone()));
         self.results.push(result);
         self.view_dirty = true;
+        self.rtt_stats_dirty = true;
     }
 
     pub fn ensure_results_view(&mut self) {
@@ -555,12 +567,15 @@ impl App {
         self.view_dirty = false;
         self.view_rebuilds += 1;
 
+        // Keep display order while using O(1) average lookup for each unique host.
         let mut groups_map: Vec<(IpAddr, Vec<usize>)> = Vec::new();
+        let mut host_indices = std::collections::HashMap::<IpAddr, usize>::new();
         for &idx in &self.visible_indices {
             let ip = self.rows[idx].raw.ip;
-            if let Some((_, list)) = groups_map.iter_mut().find(|(group_ip, _)| *group_ip == ip) {
-                list.push(idx);
+            if let Some(&group_idx) = host_indices.get(&ip) {
+                groups_map[group_idx].1.push(idx);
             } else {
+                host_indices.insert(ip, groups_map.len());
                 groups_map.push((ip, vec![idx]));
             }
         }
@@ -568,6 +583,15 @@ impl App {
             .into_iter()
             .map(|(ip, indices)| HostGroup::build(ip, indices, &self.rows))
             .collect();
+    }
+
+    /// Cache latency distribution until scan results change, not once per UI frame.
+    pub fn current_rtt_stats(&mut self) -> Option<crate::ui::rtt_view::RttStats> {
+        if self.rtt_stats_dirty {
+            self.cached_rtt_stats = crate::ui::rtt_view::calculate_rtt_stats(&self.results);
+            self.rtt_stats_dirty = false;
+        }
+        self.cached_rtt_stats.clone()
     }
 
     pub fn visible_indices(&self) -> &[usize] {
@@ -810,6 +834,8 @@ impl App {
         self.rows.clear();
         self.visible_indices.clear();
         self.host_groups.clear();
+        self.cached_rtt_stats = None;
+        self.rtt_stats_dirty = true;
         self.selected_result = None;
         self.view_dirty = false;
         self.dropped_open_results = 0;
@@ -1413,6 +1439,40 @@ mod tests {
         assert_eq!(app.view_rebuilds(), 3);
         let first = app.row(app.visible_indices()[0]).raw.port;
         assert_eq!(first, 443);
+    }
+
+    #[test]
+    fn unanswered_udp_does_not_pollute_cached_or_host_latency() {
+        let mut app = App::default_state();
+        let unanswered = ScanResult::udp(
+            IpAddr::from([10, 0, 0, 10]),
+            161,
+            PortState::OpenFiltered,
+            "snmp",
+            Duration::from_millis(800),
+            false,
+        );
+        app.push_result(unanswered);
+        assert!(app.current_rtt_stats().is_none());
+        app.ensure_results_view();
+        assert_eq!(app.host_groups().len(), 1);
+        assert!(!app.host_groups()[0].has_measured_rtt);
+
+        app.push_result(ScanResult::new(
+            IpAddr::from([10, 0, 0, 10]),
+            80,
+            "http",
+            Duration::from_millis(12),
+        ));
+        let stats = app.current_rtt_stats().unwrap();
+        assert_eq!(stats.count, 1);
+        assert!((stats.min_ms - 12.0).abs() < 1e-4);
+        app.ensure_results_view();
+        assert_eq!(app.host_groups()[0].min_rtt, Duration::from_millis(12));
+        assert!(app.host_groups()[0].has_measured_rtt);
+
+        app.clear_results_storage();
+        assert!(app.current_rtt_stats().is_none());
     }
 
     #[test]

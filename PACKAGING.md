@@ -78,8 +78,8 @@ xcode-select --install
 
 ```bash
 # Клонирование репозитория
-git clone https://github.com/your-org/ip_port_scanner.git
-cd ip_port_scanner
+git clone https://github.com/uzbatsu-beep/IP_PORT.git
+cd IP_PORT
 
 # Проверка форматирования и линтинг
 cargo fmt --check
