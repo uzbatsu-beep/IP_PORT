@@ -1175,6 +1175,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn excluded_ip_is_never_scheduled_when_other_hosts_are_allowed() {
+        let banned = IpAddr::from([10, 0, 0, 1]);
+        let allowed = IpAddr::from([10, 0, 0, 2]);
+        let config = ScanConfig {
+            targets: TargetList::from_ips(vec![banned, allowed]),
+            ports: vec![80, 443],
+            timeout: Duration::from_millis(100),
+            concurrency: 2,
+            banner_grabbing: false,
+            banner_timeout: Duration::from_millis(100),
+            protocol: ScanProtocol::Tcp,
+            bind_addr: None,
+            exclusions: scope::Exclusions::parse("10.0.0.1").unwrap(),
+        };
+        assert_eq!(config.total_probes().unwrap(), 2);
+        let seen = Arc::new(Mutex::new(Vec::<IpAddr>::new()));
+        let recorded = Arc::clone(&seen);
+        let (tx, mut rx) = mpsc::channel(16);
+        let terminal = run_with_probe(
+            config,
+            2,
+            tx,
+            CancellationToken::new(),
+            move |ip, _port, _timeout| {
+                let recorded = Arc::clone(&recorded);
+                async move {
+                    recorded.lock().unwrap().push(ip);
+                    probe::ProbeOutcome::Refused
+                }
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(terminal, ScanEvent::Finished { done: 2, .. }));
+        let observed = seen.lock().unwrap();
+        assert_eq!(observed.len(), 2);
+        assert!(observed.iter().all(|ip| *ip == allowed));
+        assert!(!observed.contains(&banned));
+        let start = rx.try_recv().unwrap();
+        assert!(matches!(start, ScanEvent::Started { total: 2 }));
+    }
+
+    #[tokio::test]
     async fn exclusions_apply_after_forward_dns_without_probes() {
         let config = ScanConfig {
             targets: TargetList::new(Vec::new(), vec!["localhost".to_owned()]),
