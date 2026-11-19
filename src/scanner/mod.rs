@@ -1172,6 +1172,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn exclusions_apply_after_forward_dns_without_probes() {
+        let config = ScanConfig {
+            targets: TargetList::new(Vec::new(), vec!["localhost".to_owned()]),
+            ports: vec![22, 80],
+            timeout: Duration::from_millis(500),
+            concurrency: 2,
+            banner_grabbing: false,
+            banner_timeout: Duration::from_millis(500),
+            protocol: ScanProtocol::Tcp,
+            bind_addr: None,
+            exclusions: scope::Exclusions::parse("127.0.0.0/8\n::1").unwrap(),
+        };
+        let (tx, mut rx) = mpsc::channel(16);
+        let err = run(config, 2, tx, CancellationToken::new()).await.unwrap_err();
+        assert!(err.contains("All resolved targets"), "{err}");
+        assert!(rx.try_recv().is_err(), "Excluded targets must not emit probe events");
+    }
+
+    #[tokio::test]
     async fn scan_reports_error_when_hostname_fails_to_resolve() {
         let config = ScanConfig {
             targets: TargetList::new(
