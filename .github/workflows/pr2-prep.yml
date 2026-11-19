@@ -1,0 +1,41 @@
+# Disposable branch-preparation workflow. Removes itself from the PR branch.
+name: Prepare PR #2 Rust formatting and lockfile
+on:
+  push:
+    branches:
+      - feat/pr-2-network-discovery-v0.4.0
+    paths:
+      - .github/workflows/pr2-prep.yml
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Generate minimal Cargo.lock changes for dns-lookup
+        run: cargo metadata --format-version 1 > /dev/null
+
+      - name: Format Rust sources
+        run: cargo fmt --all
+
+      - name: Remove one-time workflow and commit reproducible sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/pr2-prep.yml
+          git add -A
+          git diff --cached --stat
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: lock dns-lookup and rustfmt v0.4.0 implementation"
+          git push origin HEAD:refs/heads/feat/pr-2-network-discovery-v0.4.0
