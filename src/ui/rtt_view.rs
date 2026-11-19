@@ -351,7 +351,7 @@ mod tests {
             Duration::from_millis(800),
             false,
         );
-        assert!(calculate_rtt_stats(&[unanswered.clone()]).is_none());
+        assert!(calculate_rtt_stats(std::slice::from_ref(&unanswered)).is_none());
         let stats = calculate_rtt_stats(&[confirmed, unanswered]).unwrap();
         assert_eq!(stats.count, 1);
         assert!((stats.avg_ms - 12.0).abs() < 1e-4);
