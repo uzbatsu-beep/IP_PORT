@@ -346,9 +346,9 @@ mod tests {
         let unanswered = ScanResult::udp(
             IpAddr::from([127, 0, 0, 1]),
             161,
+            crate::scanner::PortState::OpenFiltered,
             "snmp",
             Duration::from_millis(800),
-            crate::scanner::PortState::OpenFiltered,
             false,
         );
         assert!(calculate_rtt_stats(&[unanswered.clone()]).is_none());
