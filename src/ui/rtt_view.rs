@@ -1,7 +1,7 @@
 use egui::{Color32, RichText, Ui};
 
 use crate::app::App;
-use crate::scanner::ScanResult;
+use crate::scanner::{PortState, ScanResult};
 
 /// Статистические метрики задержки (RTT) для набора открытых портов.
 #[derive(Clone, Debug, PartialEq)]
@@ -93,14 +93,15 @@ fn percentile(sorted: &[f64], pct: f64) -> f64 {
 
 /// Вычисляет статистику задержек и распределение по корзинам из списка результатов.
 pub fn calculate_rtt_stats(results: &[ScanResult]) -> Option<RttStats> {
-    if results.is_empty() {
-        return None;
-    }
-
+    // Open|Filtered means no UDP response; the timeout is not a measured RTT.
     let mut latencies: Vec<f64> = results
         .iter()
+        .filter(|r| r.state == PortState::Open)
         .map(|r| r.rtt.as_secs_f64() * 1000.0)
         .collect();
+    if latencies.is_empty() {
+        return None;
+    }
     latencies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let count = latencies.len();
@@ -337,6 +338,23 @@ mod tests {
     #[test]
     fn calculate_rtt_stats_returns_none_for_empty() {
         assert_eq!(calculate_rtt_stats(&[]), None);
+    }
+
+    #[test]
+    fn ignores_unanswered_udp_probes_in_latency_statistics() {
+        let confirmed = sample_scan_result(12);
+        let unanswered = ScanResult::udp(
+            IpAddr::from([127, 0, 0, 1]),
+            161,
+            "snmp",
+            Duration::from_millis(800),
+            crate::scanner::PortState::OpenFiltered,
+            false,
+        );
+        assert!(calculate_rtt_stats(&[unanswered.clone()]).is_none());
+        let stats = calculate_rtt_stats(&[confirmed, unanswered]).unwrap();
+        assert_eq!(stats.count, 1);
+        assert!((stats.avg_ms - 12.0).abs() < 1e-4);
     }
 
     #[test]
