@@ -416,8 +416,13 @@ fn scope_feedback(preview: &Result<ScopePreview, String>, running: bool, ui: &mu
                 .small(),
             );
             if scope.hostnames > 0 {
-                ui.label(RichText::new("DNS addresses are excluded after resolution; final scope may be smaller.")
-                    .small().weak());
+                ui.label(
+                    RichText::new(
+                        "DNS addresses are excluded after resolution; final scope may be smaller.",
+                    )
+                    .small()
+                    .weak(),
+                );
             }
         }
         Ok(_) => {}

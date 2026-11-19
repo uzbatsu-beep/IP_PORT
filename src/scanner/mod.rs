@@ -1,7 +1,7 @@
 pub mod interfaces;
 pub mod presets;
-pub mod scope;
 pub mod probe;
+pub mod scope;
 pub mod services;
 pub mod targets;
 pub mod udp;
@@ -238,7 +238,10 @@ impl ScanConfig {
         if self.targets.is_empty() || self.ports.is_empty() {
             return Err("At least one target and port are required".to_owned());
         }
-        let remaining_explicit = self.targets.ips.iter()
+        let remaining_explicit = self
+            .targets
+            .ips
+            .iter()
             .filter(|ip| !self.exclusions.contains(ip))
             .count();
         let targets = remaining_explicit.saturating_add(self.targets.hostnames.len());
@@ -1185,9 +1188,14 @@ mod tests {
             exclusions: scope::Exclusions::parse("127.0.0.0/8\n::1").unwrap(),
         };
         let (tx, mut rx) = mpsc::channel(16);
-        let err = run(config, 2, tx, CancellationToken::new()).await.unwrap_err();
+        let err = run(config, 2, tx, CancellationToken::new())
+            .await
+            .unwrap_err();
         assert!(err.contains("All resolved targets"), "{err}");
-        assert!(rx.try_recv().is_err(), "Excluded targets must not emit probe events");
+        assert!(
+            rx.try_recv().is_err(),
+            "Excluded targets must not emit probe events"
+        );
     }
 
     #[tokio::test]

@@ -312,10 +312,12 @@ fn render_grouped_by_host(app: &mut App, ui: &mut Ui) {
             let host_groups = app.host_groups().to_vec();
             for group in &host_groups {
                 let info = app.host_info.get(&group.ip);
-                let display_host = info.and_then(|i| i.hostname.as_deref())
+                let display_host = info
+                    .and_then(|i| i.hostname.as_deref())
                     .map(|name| format!("{} ({name})", group.ip_text))
                     .unwrap_or_else(|| group.ip_text.clone());
-                let identity = info.and_then(|i| i.mac.as_deref())
+                let identity = info
+                    .and_then(|i| i.mac.as_deref())
                     .map(|mac| format!(" · MAC {mac}"))
                     .unwrap_or_default();
                 let latency_text = if group.has_measured_rtt {

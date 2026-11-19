@@ -4,10 +4,10 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::host_info::{HostInfo, HostInfoWorker};
-use crate::scanner::{scope::Exclusions, targets};
 use crate::scanner::{
     self, PortState, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
 };
+use crate::scanner::{scope::Exclusions, targets};
 use crate::ui;
 
 /// Максимальное число событий сканера, обрабатываемых за один кадр UI.
@@ -235,7 +235,10 @@ impl InputCache {
         }
         if changed {
             self.preview = Self::compute_preview(
-                &self.targets, &self.ports, &self.bind_addr, &self.exclusions,
+                &self.targets,
+                &self.ports,
+                &self.bind_addr,
+                &self.exclusions,
             );
         }
     }
@@ -249,11 +252,17 @@ impl InputCache {
         if let Err(err) = bind_addr {
             return Err(err.clone());
         }
-        let exclusions = exclusions.as_ref().map_err(|err| format!("Exclusions: {err}"))?;
+        let exclusions = exclusions
+            .as_ref()
+            .map_err(|err| format!("Exclusions: {err}"))?;
         let (targets_len, hostnames_len, excluded) = match targets {
             Ok(list) => {
                 let excluded = list.ips.iter().filter(|ip| exclusions.contains(ip)).count();
-                (list.estimated_count() - excluded, list.hostnames.len(), excluded)
+                (
+                    list.estimated_count() - excluded,
+                    list.hostnames.len(),
+                    excluded,
+                )
             }
             Err(err) => return Err(format!("Targets: {err}")),
         };
@@ -357,7 +366,10 @@ impl App {
         let bind_addr_input = String::new();
         let exclusions_input = String::new();
         let input_cache = InputCache::new(
-            &targets_input, &ports_input, &bind_addr_input, &exclusions_input,
+            &targets_input,
+            &ports_input,
+            &bind_addr_input,
+            &exclusions_input,
         );
 
         Self {
@@ -503,7 +515,12 @@ impl App {
             banner_timeout: Duration::from_millis(self.banner_timeout_ms),
             protocol: self.protocol,
             bind_addr,
-            exclusions: self.input_cache.exclusions.as_ref().expect("validated exclusions").clone(),
+            exclusions: self
+                .input_cache
+                .exclusions
+                .as_ref()
+                .expect("validated exclusions")
+                .clone(),
         };
         let handle = match spawn_fn(config) {
             Ok(handle) => handle,
@@ -592,7 +609,10 @@ impl App {
 
     fn drain_host_enrichment(&mut self, ctx: &egui::Context) {
         for _ in 0..128 {
-            let next = self.host_info_worker.as_ref().and_then(HostInfoWorker::try_recv);
+            let next = self
+                .host_info_worker
+                .as_ref()
+                .and_then(HostInfoWorker::try_recv);
             let Some((ip, info)) = next else { break };
             self.host_info_pending.remove(&ip);
             self.host_info.insert(ip, info);
@@ -620,11 +640,18 @@ impl App {
         let query_lower = self.results_filter.trim().to_ascii_lowercase();
         self.visible_indices.clear();
         for (idx, row) in self.rows.iter().enumerate() {
-            let info_matches = self.host_info.get(&row.raw.ip).is_some_and(|info| {
-                info.hostname.as_deref().is_some_and(|value| contains_ascii_case_insensitive(value, &query_lower))
-                    || info.mac.as_deref().is_some_and(|value| contains_ascii_case_insensitive(value, &query_lower))
-                    || info.vendor.as_deref().is_some_and(|value| contains_ascii_case_insensitive(value, &query_lower))
-            });
+            let info_matches =
+                self.host_info.get(&row.raw.ip).is_some_and(|info| {
+                    info.hostname
+                        .as_deref()
+                        .is_some_and(|value| contains_ascii_case_insensitive(value, &query_lower))
+                        || info.mac.as_deref().is_some_and(|value| {
+                            contains_ascii_case_insensitive(value, &query_lower)
+                        })
+                        || info.vendor.as_deref().is_some_and(|value| {
+                            contains_ascii_case_insensitive(value, &query_lower)
+                        })
+                });
             if row.matches_lowercase_query(&query_lower) || info_matches {
                 self.visible_indices.push(idx);
             }
@@ -783,8 +810,12 @@ impl App {
             .spawn(move || {
                 let result = match extension.as_str() {
                     "csv" => crate::export::save_csv(&path_for_task, &snapshot),
-                    "json" => crate::export::save_json_enriched(&path_for_task, &snapshot, &host_metadata),
-                    "html" => crate::export::save_html_enriched(&path_for_task, &snapshot, &host_metadata),
+                    "json" => {
+                        crate::export::save_json_enriched(&path_for_task, &snapshot, &host_metadata)
+                    }
+                    "html" => {
+                        crate::export::save_html_enriched(&path_for_task, &snapshot, &host_metadata)
+                    }
                     _ => crate::export::save_json(&path_for_task, &snapshot),
                 }
                 .map_err(|err| err.to_string());
@@ -1738,10 +1769,18 @@ mod tests {
 
         app.exclusions_input = "10.0.0.0/24".to_owned();
         assert!(!app.can_start_scan());
-        assert!(app.refresh_input_preview().unwrap_err().contains("excluded"));
+        assert!(
+            app.refresh_input_preview()
+                .unwrap_err()
+                .contains("excluded")
+        );
 
         app.exclusions_input = "not-an-ip".to_owned();
-        assert!(app.refresh_input_preview().unwrap_err().contains("Exclusions:"));
+        assert!(
+            app.refresh_input_preview()
+                .unwrap_err()
+                .contains("Exclusions:")
+        );
     }
 
     #[test]

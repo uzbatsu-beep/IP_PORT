@@ -262,7 +262,12 @@ mod tests {
     fn rejects_malformed_exclusions_in_profile() {
         let mut profile = sample();
         profile.exclusions = "not-an-ip".to_owned();
-        assert!(profile.validate().unwrap_err().contains("Invalid exclusions"));
+        assert!(
+            profile
+                .validate()
+                .unwrap_err()
+                .contains("Invalid exclusions")
+        );
         profile.exclusions = "127.0.0.0/8\n192.168.1.0/24".to_owned();
         assert!(profile.validate().unwrap_err().contains("All targets"));
     }

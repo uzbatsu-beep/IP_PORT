@@ -47,14 +47,32 @@ impl HostInfoWorker {
                         } else {
                             None
                         };
-                        if neighbor_cache && last_refresh.is_none_or(|last| last.elapsed() >= Duration::from_secs(3)) {
+                        if neighbor_cache
+                            && last_refresh
+                                .is_none_or(|last| last.elapsed() >= Duration::from_secs(3))
+                        {
                             neighbors = read_neighbor_cache();
                             last_refresh = Some(Instant::now());
                         }
-                        let mac = if neighbor_cache { neighbors.get(&ip).cloned() } else { None };
+                        let mac = if neighbor_cache {
+                            neighbors.get(&ip).cloned()
+                        } else {
+                            None
+                        };
                         let oui = mac.as_deref().and_then(oui_prefix);
                         let vendor = mac.as_deref().and_then(oui_vendor).map(str::to_owned);
-                        if updates_sender.send((ip, HostInfo { hostname, mac, oui, vendor })).is_err() {
+                        if updates_sender
+                            .send((
+                                ip,
+                                HostInfo {
+                                    hostname,
+                                    mac,
+                                    oui,
+                                    vendor,
+                                },
+                            ))
+                            .is_err()
+                        {
                             break;
                         }
                     }
@@ -78,11 +96,21 @@ fn normalize_mac(raw: &str) -> Option<String> {
     if chunks.len() != 6 || chunks.iter().any(|p| p.len() != 2) {
         return None;
     }
-    let bytes: Vec<u8> = chunks.iter().map(|p| u8::from_str_radix(p, 16)).collect::<Result<_, _>>().ok()?;
+    let bytes: Vec<u8> = chunks
+        .iter()
+        .map(|p| u8::from_str_radix(p, 16))
+        .collect::<Result<_, _>>()
+        .ok()?;
     if bytes.iter().all(|b| *b == 0) || bytes.iter().all(|b| *b == 255) || bytes[0] & 1 != 0 {
         return None;
     }
-    Some(bytes.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":"))
+    Some(
+        bytes
+            .iter()
+            .map(|b| format!("{b:02X}"))
+            .collect::<Vec<_>>()
+            .join(":"),
+    )
 }
 
 pub fn oui_prefix(mac: &str) -> Option<String> {
@@ -144,22 +172,30 @@ fn read_neighbor_cache() -> HashMap<IpAddr, String> {
             neighbors.extend(parse_neighbor_cache(&contents));
         }
         if let Ok(output) = Command::new("ip").args(["-6", "neigh", "show"]).output() {
-            neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(&output.stdout)));
+            neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(
+                &output.stdout,
+            )));
         }
     }
     #[cfg(target_os = "windows")]
     {
         if let Ok(output) = Command::new("arp").arg("-a").output() {
-            neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(&output.stdout)));
+            neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(
+                &output.stdout,
+            )));
         }
     }
     #[cfg(target_os = "macos")]
     {
         if let Ok(output) = Command::new("arp").arg("-an").output() {
-            neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(&output.stdout)));
+            neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(
+                &output.stdout,
+            )));
         }
         if let Ok(output) = Command::new("ndp").arg("-an").output() {
-            neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(&output.stdout)));
+            neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(
+                &output.stdout,
+            )));
         }
     }
     neighbors
@@ -177,10 +213,22 @@ mod tests {
             ? (192.168.1.4) at dc:a6:32:01:02:03 on en0 ifscope [ethernet]\n\
             fe80::2%en0 dev en0 lladdr 00:00:0c:aa:bb:cc REACHABLE";
         let table = parse_neighbor_cache(data);
-        assert_eq!(table[&"192.168.1.2".parse::<IpAddr>().unwrap()], "B8:27:EB:12:34:56");
-        assert_eq!(table[&"192.168.1.3".parse::<IpAddr>().unwrap()], "00:1B:21:AA:BB:CC");
-        assert_eq!(table[&"fe80::2".parse::<IpAddr>().unwrap()], "00:00:0C:AA:BB:CC");
-        assert_eq!(oui_vendor(&table[&"192.168.1.2".parse::<IpAddr>().unwrap()]), Some("Raspberry Pi Foundation"));
+        assert_eq!(
+            table[&"192.168.1.2".parse::<IpAddr>().unwrap()],
+            "B8:27:EB:12:34:56"
+        );
+        assert_eq!(
+            table[&"192.168.1.3".parse::<IpAddr>().unwrap()],
+            "00:1B:21:AA:BB:CC"
+        );
+        assert_eq!(
+            table[&"fe80::2".parse::<IpAddr>().unwrap()],
+            "00:00:0C:AA:BB:CC"
+        );
+        assert_eq!(
+            oui_vendor(&table[&"192.168.1.2".parse::<IpAddr>().unwrap()]),
+            Some("Raspberry Pi Foundation")
+        );
     }
 
     #[test]

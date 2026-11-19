@@ -779,20 +779,30 @@ mod tests {
         let json_path = dir.join("ip_port_v04_metadata.json");
         let html_path = dir.join("ip_port_v04_metadata.html");
         let ip: IpAddr = "10.0.0.1".parse().unwrap();
-        let items = [ScanResult::new(ip, 80, "http", std::time::Duration::from_millis(12))];
+        let items = [ScanResult::new(
+            ip,
+            80,
+            "http",
+            std::time::Duration::from_millis(12),
+        )];
         let mut info = HashMap::new();
-        info.insert(ip, HostInfo {
-            hostname: Some("server<unsafe>.local".to_owned()),
-            mac: Some("B8:27:EB:00:11:22".to_owned()),
-            oui: Some("B8:27:EB".to_owned()),
-            vendor: Some("Raspberry Pi Foundation".to_owned()),
-        });
+        info.insert(
+            ip,
+            HostInfo {
+                hostname: Some("server<unsafe>.local".to_owned()),
+                mac: Some("B8:27:EB:00:11:22".to_owned()),
+                oui: Some("B8:27:EB".to_owned()),
+                vendor: Some("Raspberry Pi Foundation".to_owned()),
+            },
+        );
         save_json_enriched(&json_path, &items, &info).unwrap();
-        let parsed: serde_json::Value = serde_json::from_slice(&std::fs::read(&json_path).unwrap()).unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&json_path).unwrap()).unwrap();
         assert_eq!(parsed[0]["hostname"], "server<unsafe>.local");
         assert_eq!(parsed[0]["vendor"], "Raspberry Pi Foundation");
         save_json(&json_path, &items).unwrap();
-        let legacy: serde_json::Value = serde_json::from_slice(&std::fs::read(&json_path).unwrap()).unwrap();
+        let legacy: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&json_path).unwrap()).unwrap();
         assert!(legacy[0].get("hostname").is_none());
         save_html_enriched(&html_path, &items, &info).unwrap();
         let html = std::fs::read_to_string(&html_path).unwrap();
