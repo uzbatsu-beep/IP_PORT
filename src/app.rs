@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use crate::scanner::targets;
 use crate::scanner::{
-    self, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
+    self, PortState, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
 };
 use crate::ui;
 
