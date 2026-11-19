@@ -2,6 +2,7 @@
 
 mod app;
 mod export;
+mod host_info;
 mod profile;
 mod scanner;
 mod ui;
