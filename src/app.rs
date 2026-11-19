@@ -1630,6 +1630,7 @@ mod tests {
             ScopePreview {
                 targets: 1,
                 hostnames: 0,
+                excluded: 0,
                 ports: 3,
                 probes: 3
             }
@@ -1642,6 +1643,7 @@ mod tests {
             ScopePreview {
                 targets: 2,
                 hostnames: 1,
+                excluded: 0,
                 ports: 3,
                 probes: 6
             }
@@ -1654,6 +1656,25 @@ mod tests {
         app.start_scan();
         assert_eq!(app.status_level, StatusLevel::Error);
         assert!(!app.is_running());
+    }
+
+    #[test]
+    fn exclusions_update_preview_and_reject_empty_scope() {
+        let mut app = App::default_state();
+        app.targets_input = "10.0.0.1-10.0.0.3".to_owned();
+        app.ports_input = "80,443".to_owned();
+        app.exclusions_input = "10.0.0.2".to_owned();
+        let scope = app.refresh_input_preview().unwrap();
+        assert_eq!(scope.excluded, 1);
+        assert_eq!(scope.targets, 2);
+        assert_eq!(scope.probes, 4);
+
+        app.exclusions_input = "10.0.0.0/24".to_owned();
+        assert!(!app.can_start_scan());
+        assert!(app.refresh_input_preview().unwrap_err().contains("excluded"));
+
+        app.exclusions_input = "not-an-ip".to_owned();
+        assert!(app.refresh_input_preview().unwrap_err().contains("Exclusions:"));
     }
 
     #[test]
