@@ -1442,6 +1442,40 @@ mod tests {
     }
 
     #[test]
+    fn unanswered_udp_does_not_pollute_cached_or_host_latency() {
+        let mut app = App::default_state();
+        let unanswered = ScanResult::udp(
+            IpAddr::from([10, 0, 0, 10]),
+            161,
+            PortState::OpenFiltered,
+            "snmp",
+            Duration::from_millis(800),
+            false,
+        );
+        app.push_result(unanswered);
+        assert!(app.current_rtt_stats().is_none());
+        app.ensure_results_view();
+        assert_eq!(app.host_groups().len(), 1);
+        assert!(!app.host_groups()[0].has_measured_rtt);
+
+        app.push_result(ScanResult::new(
+            IpAddr::from([10, 0, 0, 10]),
+            80,
+            "http",
+            Duration::from_millis(12),
+        ));
+        let stats = app.current_rtt_stats().unwrap();
+        assert_eq!(stats.count, 1);
+        assert!((stats.min_ms - 12.0).abs() < 1e-4);
+        app.ensure_results_view();
+        assert_eq!(app.host_groups()[0].min_rtt, Duration::from_millis(12));
+        assert!(app.host_groups()[0].has_measured_rtt);
+
+        app.clear_results_storage();
+        assert!(app.current_rtt_stats().is_none());
+    }
+
+    #[test]
     fn host_groups_aggregation_and_view_mode_toggle() {
         let mut app = App::default_state();
         assert_eq!(app.view_mode, ResultsViewMode::Flat);
