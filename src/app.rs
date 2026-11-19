@@ -36,17 +36,19 @@ pub struct HostGroup {
     pub ports_count: usize,
     pub services_summary: String,
     pub min_rtt: Duration,
+    pub has_measured_rtt: bool,
 }
 
 impl HostGroup {
     pub fn build(ip: IpAddr, indices: Vec<usize>, rows: &[ResultRow]) -> Self {
         let ip_text = ip.to_string();
         let ports_count = indices.len();
-        let min_rtt = indices
+        let confirmed_rtt = indices
             .iter()
+            .filter(|&&idx| rows[idx].raw.state == PortState::Open)
             .map(|&idx| rows[idx].raw.rtt)
-            .min()
-            .unwrap_or_default();
+            .min();
+        let min_rtt = confirmed_rtt.unwrap_or_default();
 
         let mut distinct_services: Vec<&str> = Vec::new();
         for &idx in &indices {
@@ -75,6 +77,7 @@ impl HostGroup {
             ports_count,
             services_summary,
             min_rtt,
+            has_measured_rtt: confirmed_rtt.is_some(),
         }
     }
 }
