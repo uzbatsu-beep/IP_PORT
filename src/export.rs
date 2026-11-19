@@ -1,6 +1,9 @@
+use std::collections::HashMap;
 use std::io::{self, BufWriter, Write};
+use std::net::IpAddr;
 use std::path::Path;
 
+use crate::host_info::HostInfo;
 use crate::scanner::ScanResult;
 
 /// Версия схемы форматов экспорта (CSV/JSON v1).
@@ -116,6 +119,14 @@ fn write_csv_field(out: &mut impl Write, value: &str) -> io::Result<()> {
 
 /// Сохраняет результаты в JSON.
 pub fn save_json(path: &Path, results: &[ScanResult]) -> io::Result<()> {
+    save_json_enriched(path, results, &HashMap::new())
+}
+
+pub fn save_json_enriched(
+    path: &Path,
+    results: &[ScanResult],
+    metadata: &HashMap<IpAddr, HostInfo>,
+) -> io::Result<()> {
     let file = std::fs::File::create(path)?;
     let mut out = BufWriter::new(file);
     writeln!(out, "[")?;
@@ -133,6 +144,19 @@ pub fn save_json(path: &Path, results: &[ScanResult]) -> io::Result<()> {
         if let Some(banner) = &result.banner {
             write!(out, ", \"banner\": ")?;
             write_json_string(&mut out, banner)?;
+        }
+        if let Some(info) = metadata.get(&result.ip) {
+            for (field, value) in [
+                ("hostname", info.hostname.as_deref()),
+                ("mac", info.mac.as_deref()),
+                ("oui", info.oui.as_deref()),
+                ("vendor", info.vendor.as_deref()),
+            ] {
+                if let Some(value) = value {
+                    write!(out, ", \"{field}\": ")?;
+                    write_json_string(&mut out, value)?;
+                }
+            }
         }
         if result.state == crate::scanner::PortState::OpenFiltered {
             writeln!(out, ", \"rtt_ms\": null}}{comma}")?;
@@ -187,6 +211,14 @@ pub fn escape_html(input: &str) -> String {
 
 /// Сохраняет результаты в красивый интерактивный автономный HTML-отчёт.
 pub fn save_html(path: &Path, results: &[ScanResult]) -> io::Result<()> {
+    save_html_enriched(path, results, &HashMap::new())
+}
+
+pub fn save_html_enriched(
+    path: &Path,
+    results: &[ScanResult],
+    metadata: &HashMap<IpAddr, HostInfo>,
+) -> io::Result<()> {
     let file = std::fs::File::create(path)?;
     let mut out = BufWriter::new(file);
 
@@ -434,7 +466,23 @@ pub fn save_html(path: &Path, results: &[ScanResult]) -> io::Result<()> {
     writeln!(out, "      <tbody>")?;
 
     for res in results {
-        let ip_esc = escape_html(&res.ip.to_string());
+        let mut ip_esc = escape_html(&res.ip.to_string());
+        if let Some(info) = metadata.get(&res.ip) {
+            for (label, value) in [
+                ("PTR", info.hostname.as_deref()),
+                ("MAC", info.mac.as_deref()),
+                ("OUI", info.oui.as_deref()),
+                ("Vendor", info.vendor.as_deref()),
+            ] {
+                if let Some(value) = value {
+                    ip_esc.push_str(&format!(
+                        "<div class=\"banner\">{}: {}</div>",
+                        label,
+                        escape_html(value)
+                    ));
+                }
+            }
+        }
         let port = res.port;
         let proto = res.protocol.as_str();
         let state = res.state.as_str();
@@ -723,6 +771,36 @@ mod tests {
         assert_eq!(parsed[1].get("banner"), None);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn metadata_is_exported_safely_without_changing_legacy_json() {
+        let dir = std::env::temp_dir();
+        let json_path = dir.join("ip_port_v04_metadata.json");
+        let html_path = dir.join("ip_port_v04_metadata.html");
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        let items = [ScanResult::new(ip, 80, "http", std::time::Duration::from_millis(12))];
+        let mut info = HashMap::new();
+        info.insert(ip, HostInfo {
+            hostname: Some("server<unsafe>.local".to_owned()),
+            mac: Some("B8:27:EB:00:11:22".to_owned()),
+            oui: Some("B8:27:EB".to_owned()),
+            vendor: Some("Raspberry Pi Foundation".to_owned()),
+        });
+        save_json_enriched(&json_path, &items, &info).unwrap();
+        let parsed: serde_json::Value = serde_json::from_slice(&std::fs::read(&json_path).unwrap()).unwrap();
+        assert_eq!(parsed[0]["hostname"], "server<unsafe>.local");
+        assert_eq!(parsed[0]["vendor"], "Raspberry Pi Foundation");
+        save_json(&json_path, &items).unwrap();
+        let legacy: serde_json::Value = serde_json::from_slice(&std::fs::read(&json_path).unwrap()).unwrap();
+        assert!(legacy[0].get("hostname").is_none());
+        save_html_enriched(&html_path, &items, &info).unwrap();
+        let html = std::fs::read_to_string(&html_path).unwrap();
+        assert!(html.contains("server&lt;unsafe&gt;.local"));
+        assert!(!html.contains("server<unsafe>.local"));
+        assert!(html.contains("B8:27:EB:00:11:22"));
+        let _ = std::fs::remove_file(json_path);
+        let _ = std::fs::remove_file(html_path);
     }
 
     #[test]
