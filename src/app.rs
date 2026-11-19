@@ -1,7 +1,9 @@
+use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use crate::host_info::{HostInfo, HostInfoWorker};
 use crate::scanner::{scope::Exclusions, targets};
 use crate::scanner::{
     self, PortState, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
@@ -293,6 +295,11 @@ pub struct App {
     pub ports_input: String,
     pub bind_addr_input: String,
     pub exclusions_input: String,
+    pub resolve_ptr: bool,
+    pub read_neighbor_cache: bool,
+    pub host_info: HashMap<IpAddr, HostInfo>,
+    host_info_pending: HashSet<IpAddr>,
+    host_info_worker: Option<HostInfoWorker>,
     pub interfaces: Vec<crate::scanner::NetworkInterfaceInfo>,
     pub timeout_ms: u64,
     pub concurrency: usize,
@@ -358,6 +365,11 @@ impl App {
             ports_input,
             bind_addr_input,
             exclusions_input,
+            resolve_ptr: false,
+            read_neighbor_cache: false,
+            host_info: HashMap::new(),
+            host_info_pending: HashSet::new(),
+            host_info_worker: None,
             interfaces: crate::scanner::interfaces::list_interfaces(),
             timeout_ms: 800,
             concurrency: 256,
@@ -502,6 +514,7 @@ impl App {
         };
 
         self.clear_results_storage();
+        self.start_host_enrichment();
         self.selected_result = None;
         self.target_count = preview.targets;
         self.port_count = preview.ports;
@@ -541,6 +554,9 @@ impl App {
             return;
         }
         self.clear_results_storage();
+        if self.is_running() {
+            self.start_host_enrichment();
+        }
         if !self.is_running() {
             self.set_status(StatusLevel::Idle, "Results cleared".to_owned());
         }
@@ -551,10 +567,45 @@ impl App {
             self.dropped_open_results += 1;
             return;
         }
+        if !self.host_info.contains_key(&result.ip)
+            && !self.host_info_pending.contains(&result.ip)
+            && let Some(worker) = &self.host_info_worker
+            && worker.submit(result.ip)
+        {
+            self.host_info_pending.insert(result.ip);
+        }
         self.rows.push(ResultRow::from_result(result.clone()));
         self.results.push(result);
         self.view_dirty = true;
         self.rtt_stats_dirty = true;
+    }
+
+    fn start_host_enrichment(&mut self) {
+        if !self.resolve_ptr && !self.read_neighbor_cache {
+            return;
+        }
+        match HostInfoWorker::start(self.resolve_ptr, self.read_neighbor_cache) {
+            Ok(worker) => self.host_info_worker = Some(worker),
+            Err(err) => self.show_toast(format!("Host enrichment disabled: {err}")),
+        }
+    }
+
+    fn drain_host_enrichment(&mut self, ctx: &egui::Context) {
+        for _ in 0..128 {
+            let next = self.host_info_worker.as_ref().and_then(HostInfoWorker::try_recv);
+            let Some((ip, info)) = next else { break };
+            self.host_info_pending.remove(&ip);
+            self.host_info.insert(ip, info);
+            // Metadata can affect displayed rows and future filter matches.
+            self.view_dirty = true;
+        }
+        if self.host_info_worker.is_some() {
+            if self.host_info_pending.is_empty() && !self.is_running() {
+                self.host_info_worker = None;
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(125));
+            }
+        }
     }
 
     pub fn ensure_results_view(&mut self) {
@@ -807,7 +858,7 @@ impl App {
         } else {
             Some(self.bind_addr_input.trim().to_owned())
         };
-        let profile = crate::profile::ScanProfile::new(
+        let mut profile = crate::profile::ScanProfile::new(
             self.targets_input.clone(),
             self.ports_input.clone(),
             self.timeout_ms,
@@ -817,6 +868,9 @@ impl App {
             self.protocol,
             bind_addr,
         );
+        profile.exclusions = self.exclusions_input.clone();
+        profile.resolve_ptr = self.resolve_ptr;
+        profile.read_neighbor_cache = self.read_neighbor_cache;
         match crate::profile::save(path, &profile) {
             Ok(()) => {
                 let file_name = path
@@ -845,6 +899,9 @@ impl App {
                 self.banner_grabbing = profile.banner_grabbing;
                 self.banner_timeout_ms = profile.banner_timeout_ms;
                 self.protocol = profile.protocol;
+                self.exclusions_input = profile.exclusions;
+                self.resolve_ptr = profile.resolve_ptr;
+                self.read_neighbor_cache = profile.read_neighbor_cache;
                 if let Some(bind) = profile.bind_addr {
                     self.bind_addr_input = bind;
                 } else {
@@ -877,6 +934,9 @@ impl App {
         self.rows.clear();
         self.visible_indices.clear();
         self.host_groups.clear();
+        self.host_info.clear();
+        self.host_info_pending.clear();
+        self.host_info_worker = None;
         self.cached_rtt_stats = None;
         self.rtt_stats_dirty = true;
         self.selected_result = None;
@@ -1103,6 +1163,7 @@ impl App {
     pub fn update_ui(&mut self, ui: &mut egui::Ui) {
         self.poll_export_task(ui.ctx());
         let processed = self.drain_events_with_budget(MAX_EVENTS_PER_FRAME);
+        self.drain_host_enrichment(ui.ctx());
 
         let is_cmd = |m: &egui::Modifiers| m.command || m.ctrl || m.mac_cmd;
         let command = ui.input(|i| is_cmd(&i.modifiers));
