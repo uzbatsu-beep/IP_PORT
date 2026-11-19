@@ -193,6 +193,18 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         }
 
         ui.add_space(8.0);
+        egui::CollapsingHeader::new(RichText::new("Host identification").strong())
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.checkbox(&mut app.resolve_ptr, "Resolve reverse DNS (PTR)")
+                    .on_hover_text("Background OS resolver lookup for each discovered unique IP. May contact configured DNS servers.");
+                ui.checkbox(&mut app.read_neighbor_cache, "Read local ARP / NDP cache (MAC + OUI)")
+                    .on_hover_text("Read-only local operating system neighbor cache; no active discovery packets and no admin access required.");
+                ui.label(RichText::new("MAC is available only for neighboring devices present in the OS cache; vendor identification uses a small offline OUI list.")
+                    .small().weak());
+            });
+
+        ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
             if ui
                 .button("Save profile...")
