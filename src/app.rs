@@ -773,6 +773,7 @@ impl App {
         self.last_export_dir = path.parent().map(PathBuf::from);
 
         let snapshot = self.results.clone();
+        let host_metadata = self.host_info.clone();
         let snapshot_count = snapshot.len();
         let (sender, receiver) = std::sync::mpsc::channel();
         let path_for_task = path.clone();
@@ -782,8 +783,8 @@ impl App {
             .spawn(move || {
                 let result = match extension.as_str() {
                     "csv" => crate::export::save_csv(&path_for_task, &snapshot),
-                    "json" => crate::export::save_json(&path_for_task, &snapshot),
-                    "html" => crate::export::save_html(&path_for_task, &snapshot),
+                    "json" => crate::export::save_json_enriched(&path_for_task, &snapshot, &host_metadata),
+                    "html" => crate::export::save_html_enriched(&path_for_task, &snapshot, &host_metadata),
                     _ => crate::export::save_json(&path_for_task, &snapshot),
                 }
                 .map_err(|err| err.to_string());
