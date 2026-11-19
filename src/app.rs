@@ -2,7 +2,7 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crate::scanner::targets;
+use crate::scanner::{scope::Exclusions, targets};
 use crate::scanner::{
     self, PortState, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
 };
@@ -96,6 +96,7 @@ pub enum StatusLevel {
 pub struct ScopePreview {
     pub targets: usize,
     pub hostnames: usize,
+    pub excluded: usize,
     pub ports: usize,
     pub probes: usize,
 }
@@ -151,22 +152,32 @@ struct InputCache {
     targets: Result<crate::scanner::TargetList, String>,
     ports_raw: String,
     ports: Result<Vec<u16>, String>,
+    exclusions_raw: String,
+    exclusions: Result<Exclusions, String>,
     bind_addr_raw: String,
     bind_addr: Result<Option<IpAddr>, String>,
     preview: Result<ScopePreview, String>,
 }
 
 impl InputCache {
-    fn new(targets_input: &str, ports_input: &str, bind_addr_input: &str) -> Self {
+    fn new(
+        targets_input: &str,
+        ports_input: &str,
+        bind_addr_input: &str,
+        exclusions_input: &str,
+    ) -> Self {
         let targets = targets::parse_targets(targets_input);
         let ports = targets::parse_ports(ports_input);
         let bind_addr = Self::parse_bind_addr(bind_addr_input);
-        let preview = Self::compute_preview(&targets, &ports, &bind_addr);
+        let exclusions = Exclusions::parse(exclusions_input);
+        let preview = Self::compute_preview(&targets, &ports, &bind_addr, &exclusions);
         Self {
             targets_raw: targets_input.to_owned(),
             targets,
             ports_raw: ports_input.to_owned(),
             ports,
+            exclusions_raw: exclusions_input.to_owned(),
+            exclusions,
             bind_addr_raw: bind_addr_input.to_owned(),
             bind_addr,
             preview,
@@ -188,7 +199,13 @@ impl InputCache {
         }
     }
 
-    fn sync(&mut self, targets_input: &str, ports_input: &str, bind_addr_input: &str) {
+    fn sync(
+        &mut self,
+        targets_input: &str,
+        ports_input: &str,
+        bind_addr_input: &str,
+        exclusions_input: &str,
+    ) {
         let mut changed = false;
         if self.targets_raw != targets_input {
             self.targets_raw.clear();
@@ -202,6 +219,12 @@ impl InputCache {
             self.ports = targets::parse_ports(ports_input);
             changed = true;
         }
+        if self.exclusions_raw != exclusions_input {
+            self.exclusions_raw.clear();
+            self.exclusions_raw.push_str(exclusions_input);
+            self.exclusions = Exclusions::parse(exclusions_input);
+            changed = true;
+        }
         if self.bind_addr_raw != bind_addr_input {
             self.bind_addr_raw.clear();
             self.bind_addr_raw.push_str(bind_addr_input);
@@ -209,7 +232,9 @@ impl InputCache {
             changed = true;
         }
         if changed {
-            self.preview = Self::compute_preview(&self.targets, &self.ports, &self.bind_addr);
+            self.preview = Self::compute_preview(
+                &self.targets, &self.ports, &self.bind_addr, &self.exclusions,
+            );
         }
     }
 
@@ -217,14 +242,22 @@ impl InputCache {
         targets: &Result<crate::scanner::TargetList, String>,
         ports: &Result<Vec<u16>, String>,
         bind_addr: &Result<Option<IpAddr>, String>,
+        exclusions: &Result<Exclusions, String>,
     ) -> Result<ScopePreview, String> {
         if let Err(err) = bind_addr {
             return Err(err.clone());
         }
-        let (targets_len, hostnames_len) = match targets {
-            Ok(list) => (list.estimated_count(), list.hostnames.len()),
+        let exclusions = exclusions.as_ref().map_err(|err| format!("Exclusions: {err}"))?;
+        let (targets_len, hostnames_len, excluded) = match targets {
+            Ok(list) => {
+                let excluded = list.ips.iter().filter(|ip| exclusions.contains(ip)).count();
+                (list.estimated_count() - excluded, list.hostnames.len(), excluded)
+            }
             Err(err) => return Err(format!("Targets: {err}")),
         };
+        if targets_len == 0 {
+            return Err("All targets are excluded from scan scope".to_owned());
+        }
         let ports_len = match ports {
             Ok(list) => list.len(),
             Err(err) => return Err(format!("Ports: {err}")),
@@ -235,6 +268,7 @@ impl InputCache {
         Ok(ScopePreview {
             targets: targets_len,
             hostnames: hostnames_len,
+            excluded,
             ports: ports_len,
             probes,
         })
@@ -258,6 +292,7 @@ pub struct App {
     pub targets_input: String,
     pub ports_input: String,
     pub bind_addr_input: String,
+    pub exclusions_input: String,
     pub interfaces: Vec<crate::scanner::NetworkInterfaceInfo>,
     pub timeout_ms: u64,
     pub concurrency: usize,
@@ -313,12 +348,16 @@ impl App {
         let targets_input = "127.0.0.1".to_owned();
         let ports_input = "22,80,443".to_owned();
         let bind_addr_input = String::new();
-        let input_cache = InputCache::new(&targets_input, &ports_input, &bind_addr_input);
+        let exclusions_input = String::new();
+        let input_cache = InputCache::new(
+            &targets_input, &ports_input, &bind_addr_input, &exclusions_input,
+        );
 
         Self {
             targets_input,
             ports_input,
             bind_addr_input,
+            exclusions_input,
             interfaces: crate::scanner::interfaces::list_interfaces(),
             timeout_ms: 800,
             concurrency: 256,
@@ -383,6 +422,7 @@ impl App {
             &self.targets_input,
             &self.ports_input,
             &self.bind_addr_input,
+            &self.exclusions_input,
         );
         self.input_cache
             .preview
@@ -411,6 +451,7 @@ impl App {
             &self.targets_input,
             &self.ports_input,
             &self.bind_addr_input,
+            &self.exclusions_input,
         );
         let preview = match &self.input_cache.preview {
             Ok(preview) => *preview,
@@ -450,6 +491,7 @@ impl App {
             banner_timeout: Duration::from_millis(self.banner_timeout_ms),
             protocol: self.protocol,
             bind_addr,
+            exclusions: self.input_cache.exclusions.as_ref().expect("validated exclusions").clone(),
         };
         let handle = match spawn_fn(config) {
             Ok(handle) => handle,
@@ -812,6 +854,7 @@ impl App {
                     &self.targets_input,
                     &self.ports_input,
                     &self.bind_addr_input,
+                    &self.exclusions_input,
                 );
                 let file_name = path
                     .file_name()
