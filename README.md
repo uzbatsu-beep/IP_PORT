@@ -1,5 +1,16 @@
 # IP / PORT Scanner
 
+> **v0.4.0 (PR #2, development branch):** scan exclusions (IPv4/IPv6, CIDR, ranges), optional background PTR lookups, and read-only ARP/NDP neighbor-cache MAC/OUI identification. These features are not part of the published v0.3.1 release.
+
+### Scope controls in v0.4.0
+
+Use **Exclude targets** in the sidebar to avoid contacting sensitive equipment: `192.168.1.1`, `10.0.0.0/24`, `192.168.1.200-254`, `2001:db8::/64`. Exclusions are evaluated after resolving hostname targets and before scheduling any port probe. Invalid exclusions and an entirely excluded scope block the start of a scan.
+
+Under **Host identification**, enable Reverse DNS (PTR) and/or read-only neighbor-cache lookup if needed. PTR may query the configured DNS servers. ARP/NDP inspection does **not** send additional discovery traffic or require administrator privileges; only OS-cached neighbors may have MAC addresses. The built-in OUI map contains a small selection of vendors; unknown or randomized MAC addresses remain unattributed.
+
+Scan profiles preserve these options. JSON and HTML exports include available `hostname`, `mac`, `oui` and `vendor` fields; original CSV v1 remains compatible. For operational-technology networks, always review the target and exclusion lists before starting a scan.
+
+
 Кроссплатформенное приложение для сканирования IP-адресов, TCP- и UDP-портов с современным интерфейсом на Rust.
 
 ![Rust](https://img.shields.io/badge/Rust-1.95%2B-orange)
