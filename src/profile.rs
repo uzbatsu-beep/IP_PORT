@@ -122,7 +122,7 @@ mod tests {
     use super::*;
 
     fn sample() -> ScanProfile {
-        ScanProfile::new(
+        let mut profile = ScanProfile::new(
             "127.0.0.1\n192.168.1.0/30".to_owned(),
             "22,80,443".to_owned(),
             800,
@@ -131,7 +131,11 @@ mod tests {
             1200,
             crate::scanner::ScanProtocol::Udp,
             Some("192.168.1.50".to_owned()),
-        )
+        );
+        profile.exclusions = "10.10.0.0/16".to_owned();
+        profile.resolve_ptr = true;
+        profile.read_neighbor_cache = true;
+        profile
     }
 
     #[test]
@@ -252,6 +256,15 @@ mod tests {
         for profile in invalid {
             assert!(profile.validate().is_err());
         }
+    }
+
+    #[test]
+    fn rejects_malformed_exclusions_in_profile() {
+        let mut profile = sample();
+        profile.exclusions = "not-an-ip".to_owned();
+        assert!(profile.validate().unwrap_err().contains("Invalid exclusions"));
+        profile.exclusions = "127.0.0.0/8\n192.168.1.0/24".to_owned();
+        assert!(profile.validate().unwrap_err().contains("All targets"));
     }
 
     #[test]
