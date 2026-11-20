@@ -1540,6 +1540,24 @@ mod tests {
     }
 
     #[test]
+    fn ptr_soft_deadline_warns_once_without_cancelling_worker() {
+        let mut app = App::default_state();
+        app.resolve_ptr = true;
+        app.ptr_soft_deadline_ms = 500;
+        let ip = IpAddr::from([192, 0, 2, 15]);
+        app.host_info_inflight.insert(ip, Instant::now() - Duration::from_secs(2));
+        let ctx = egui::Context::default();
+        app.drain_host_enrichment(&ctx);
+        app.drain_host_enrichment(&ctx);
+        assert_eq!(app.host_info_stats.ptr_over_limit, 1);
+        assert_eq!(app.ptr_currently_overdue(), 1);
+        // A warning is not cancellation; the pending lookup remains accounted for.
+        assert!(app.host_info_inflight.contains_key(&ip));
+        app.clear_results_storage();
+        assert_eq!(app.ptr_currently_overdue(), 0);
+    }
+
+    #[test]
     fn host_enrichment_retries_full_queue_without_losing_hosts() {
         // Local worker with PTR and cache access disabled: deterministic and
         // does not contact any network, but exercises > 512 queued addresses.
