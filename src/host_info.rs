@@ -40,6 +40,8 @@ pub struct HostInfo {
     pub ptr_status: PtrStatus,
     pub ptr_duration_ms: Option<u64>,
     pub neighbor_error: Option<String>,
+    pub neighbor_interfaces: Vec<String>,
+    pub neighbor_ambiguous: bool,
 }
 
 /// Map platform results without claiming all DNS lookup failures mean NXDOMAIN.
@@ -55,6 +57,39 @@ fn classify_ptr(ip: IpAddr, result: io::Result<String>) -> (Option<String>, PtrS
             (None, PtrStatus::Failed(message))
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NeighborRecord {
+    pub mac: String,
+    pub interface: String,
+}
+pub type NeighborCache = HashMap<IpAddr, Vec<NeighborRecord>>;
+fn insert_neighbor(cache: &mut NeighborCache, ip: IpAddr, mac: String, interface: String) {
+    let records = cache.entry(ip).or_default();
+    if !records.iter().any(|r| r.mac == mac && r.interface == interface) {
+        records.push(NeighborRecord { mac, interface });
+    }
+}
+fn merge_neighbors(cache: &mut NeighborCache, additional: NeighborCache) {
+    for (ip, entries) in additional {
+        for entry in entries {
+            insert_neighbor(cache, ip, entry.mac, entry.interface);
+        }
+    }
+}
+/// Never assign an arbitrary MAC when the IP is present on multiple adapters.
+pub fn select_neighbor(cache: &NeighborCache, ip: &IpAddr)
+    -> (Option<String>, Vec<String>, bool)
+{
+    let Some(rows) = cache.get(ip) else { return (None, Vec::new(), false) };
+    let interfaces = rows.iter()
+        .map(|entry| format!("{} — {}", entry.interface, entry.mac))
+        .collect();
+    if rows.len() != 1 {
+        return (None, interfaces, true);
+    }
+    (Some(rows[0].mac.clone()), interfaces, false)
 }
 
 pub struct HostInfoWorker {
@@ -73,7 +108,7 @@ impl HostInfoWorker {
             std::thread::Builder::new()
                 .name(format!("host-enrichment-{worker_idx}"))
                 .spawn(move || {
-                    let mut neighbors = HashMap::new();
+                    let mut neighbors = NeighborCache::new();
                     let mut neighbor_error: Option<String> = None;
                     let mut last_refresh: Option<Instant> = None;
                     loop {
@@ -107,10 +142,10 @@ impl HostInfoWorker {
                             }
                             last_refresh = Some(Instant::now());
                         }
-                        let mac = if neighbor_cache {
-                            neighbors.get(&ip).cloned()
+                        let (mac, neighbor_interfaces, neighbor_ambiguous) = if neighbor_cache {
+                            select_neighbor(&neighbors, &ip)
                         } else {
-                            None
+                            (None, Vec::new(), false)
                         };
                         let oui = mac.as_deref().and_then(oui_prefix);
                         let vendor = mac.as_deref().and_then(oui_vendor).map(str::to_owned);
@@ -125,6 +160,8 @@ impl HostInfoWorker {
                                     ptr_status,
                                     ptr_duration_ms,
                                     neighbor_error: neighbor_error.clone(),
+                                    neighbor_interfaces,
+                                    neighbor_ambiguous,
                                 },
                             ))
                             .is_err()
@@ -198,30 +235,41 @@ pub fn oui_vendor(mac: &str) -> Option<&'static str> {
 }
 
 #[cfg(any(not(target_os = "windows"), test))]
-pub fn parse_neighbor_cache(output: &str) -> HashMap<IpAddr, String> {
-    let mut map = HashMap::new();
+pub fn parse_neighbor_cache(output: &str) -> NeighborCache {
+    let mut map = NeighborCache::new();
     for line in output.lines() {
+        let tokens: Vec<&str> = line.split_whitespace().collect();
         let mut ip = None;
         let mut mac = None;
-        for token in line.split_whitespace() {
-            let token = token.trim_matches(|c| c == '(' || c == ')' || c == '?' || c == ',');
+        let mut zone = None;
+        for token in &tokens {
+            let clean = token.trim_matches(|c| c == '(' || c == ')' || c == '?' || c == ',');
             if ip.is_none() {
-                // Ignore IPv6 interface zone IDs in NDP output.
-                let bare = token.split('%').next().unwrap_or(token);
-                ip = bare.parse::<IpAddr>().ok();
+                let (bare, interface) = clean.split_once('%')
+                    .map_or((clean, None), |(address, scope)| (address, Some(scope)));
+                if let Ok(address) = bare.parse::<IpAddr>() {
+                    ip = Some(address);
+                    zone = interface.map(str::to_owned);
+                }
             }
             if mac.is_none() {
-                mac = normalize_mac(token);
+                mac = normalize_mac(clean);
             }
         }
         if let (Some(ip), Some(mac)) = (ip, mac) {
-            map.insert(ip, mac);
+            let interface = tokens.windows(2).find_map(|pair| {
+                (pair[0] == "dev" || pair[0] == "on").then(|| pair[1].to_owned())
+            }).or_else(|| {
+                (tokens.len() >= 6 && tokens[1].starts_with("0x"))
+                    .then(|| tokens.last().unwrap_or(&"unknown").to_string())
+            }).or(zone).unwrap_or_else(|| "unknown interface".to_owned());
+            insert_neighbor(&mut map, ip, mac, interface);
         }
     }
     map
 }
 
-fn read_neighbor_cache() -> Result<HashMap<IpAddr, String>, String> {
+fn read_neighbor_cache() -> Result<NeighborCache, String> {
     #[cfg(target_os = "windows")]
     {
         read_windows_neighbor_cache()
@@ -234,13 +282,13 @@ fn read_neighbor_cache() -> Result<HashMap<IpAddr, String>, String> {
         #[cfg(target_os = "linux")]
         {
             if let Ok(contents) = std::fs::read_to_string("/proc/net/arp") {
-                neighbors.extend(parse_neighbor_cache(&contents));
+                merge_neighbors(&mut neighbors, parse_neighbor_cache(&contents));
                 any_source = true;
             }
             if let Ok(output) = Command::new("ip").args(["-6", "neigh", "show"]).output()
                 && output.status.success()
             {
-                neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(
+                merge_neighbors(&mut neighbors, parse_neighbor_cache(&String::from_utf8_lossy(
                     &output.stdout,
                 )));
                 any_source = true;
@@ -251,7 +299,7 @@ fn read_neighbor_cache() -> Result<HashMap<IpAddr, String>, String> {
             if let Ok(output) = Command::new("arp").arg("-an").output()
                 && output.status.success()
             {
-                neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(
+                merge_neighbors(&mut neighbors, parse_neighbor_cache(&String::from_utf8_lossy(
                     &output.stdout,
                 )));
                 any_source = true;
@@ -259,7 +307,7 @@ fn read_neighbor_cache() -> Result<HashMap<IpAddr, String>, String> {
             if let Ok(output) = Command::new("ndp").arg("-an").output()
                 && output.status.success()
             {
-                neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(
+                merge_neighbors(&mut neighbors, parse_neighbor_cache(&String::from_utf8_lossy(
                     &output.stdout,
                 )));
                 any_source = true;
@@ -274,7 +322,7 @@ fn read_neighbor_cache() -> Result<HashMap<IpAddr, String>, String> {
 }
 
 #[cfg(target_os = "windows")]
-fn read_windows_neighbor_cache() -> Result<HashMap<IpAddr, String>, String> {
+fn read_windows_neighbor_cache() -> Result<NeighborCache, String> {
     use std::net::{Ipv4Addr, Ipv6Addr};
     use windows_sys::Win32::NetworkManagement::IpHelper::{
         FreeMibTable, GetIpNetTable2, MIB_IPNET_TABLE2,
@@ -307,7 +355,7 @@ fn read_windows_neighbor_cache() -> Result<HashMap<IpAddr, String>, String> {
     let rows = unsafe {
         std::slice::from_raw_parts((*owner.0).Table.as_ptr(), (*owner.0).NumEntries as usize)
     };
-    let mut neighbors = HashMap::with_capacity(rows.len());
+    let mut neighbors = NeighborCache::with_capacity(rows.len());
     for row in rows {
         if row.PhysicalAddressLength != 6 {
             continue;
@@ -331,7 +379,7 @@ fn read_windows_neighbor_cache() -> Result<HashMap<IpAddr, String>, String> {
             .collect::<Vec<_>>()
             .join(":");
         if let Some(valid) = normalize_mac(&mac) {
-            neighbors.insert(ip, valid);
+            insert_neighbor(&mut neighbors, ip, valid, format!("ifIndex {}", row.InterfaceIndex));
         }
     }
     Ok(neighbors)
@@ -349,22 +397,14 @@ mod tests {
             ? (192.168.1.4) at dc:a6:32:01:02:03 on en0 ifscope [ethernet]\n\
             fe80::2%en0 dev en0 lladdr 00:00:0c:aa:bb:cc REACHABLE";
         let table = parse_neighbor_cache(data);
-        assert_eq!(
-            table[&"192.168.1.2".parse::<IpAddr>().unwrap()],
-            "B8:27:EB:12:34:56"
-        );
-        assert_eq!(
-            table[&"192.168.1.3".parse::<IpAddr>().unwrap()],
-            "00:1B:21:AA:BB:CC"
-        );
-        assert_eq!(
-            table[&"fe80::2".parse::<IpAddr>().unwrap()],
-            "00:00:0C:AA:BB:CC"
-        );
-        assert_eq!(
-            oui_vendor(&table[&"192.168.1.2".parse::<IpAddr>().unwrap()]),
-            Some("Raspberry Pi Foundation")
-        );
+        let ip: IpAddr = "192.168.1.2".parse().unwrap();
+        assert_eq!(select_neighbor(&table, &ip).0.as_deref(), Some("B8:27:EB:12:34:56"));
+        assert_eq!(table[&ip][0].interface, "eth0");
+        assert_eq!(select_neighbor(&table, &"192.168.1.3".parse().unwrap()).0.as_deref(), Some("00:1B:21:AA:BB:CC"));
+        let v6: IpAddr = "fe80::2".parse().unwrap();
+        assert_eq!(select_neighbor(&table, &v6).0.as_deref(), Some("00:00:0C:AA:BB:CC"));
+        assert_eq!(table[&v6][0].interface, "en0");
+        assert_eq!(oui_vendor(&table[&ip][0].mac), Some("Raspberry Pi Foundation"));
     }
 
     #[cfg(target_os = "windows")]
@@ -374,9 +414,24 @@ mod tests {
         // on the local link. Zero cached entries is a valid result.
         let result = read_windows_neighbor_cache();
         assert!(result.is_ok(), "GetIpNetTable2 query failed: {result:?}");
-        for (_ip, mac) in result.unwrap() {
-            assert_eq!(normalize_mac(&mac), Some(mac));
+        for (_ip, entries) in result.unwrap() {
+            for entry in entries {
+                assert_eq!(normalize_mac(&entry.mac), Some(entry.mac));
+                assert!(entry.interface.starts_with("ifIndex "));
+            }
         }
+    }
+
+    #[test]
+    fn same_ipv6_linklocal_on_two_adapters_is_not_misattributed() {
+        let ip: IpAddr = "fe80::1234".parse().unwrap();
+        let mut cache = NeighborCache::new();
+        insert_neighbor(&mut cache, ip, "00:1B:21:11:22:33".to_owned(), "ifIndex 4".to_owned());
+        insert_neighbor(&mut cache, ip, "00:1B:21:AA:BB:CC".to_owned(), "ifIndex 12".to_owned());
+        let (mac, interfaces, ambiguous) = select_neighbor(&cache, &ip);
+        assert!(mac.is_none());
+        assert!(ambiguous);
+        assert_eq!(interfaces.len(), 2);
     }
 
     #[test]
