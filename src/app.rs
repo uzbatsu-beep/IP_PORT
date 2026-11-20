@@ -54,7 +54,7 @@ impl HostGroup {
 
         let mut distinct_services: Vec<&str> = Vec::new();
         for &idx in &indices {
-            let svc = rows[idx].raw.service;
+            let svc = rows[idx].raw.service.as_str();
             if svc != "unknown" && !distinct_services.contains(&svc) {
                 distinct_services.push(svc);
             }
@@ -138,7 +138,7 @@ impl ResultRow {
         query_lower.is_empty()
             || contains_ascii_case_insensitive(&self.ip_text, query_lower)
             || self.port_text.contains(query_lower)
-            || contains_ascii_case_insensitive(self.raw.service, query_lower)
+            || contains_ascii_case_insensitive(&self.raw.service, query_lower)
             || contains_ascii_case_insensitive(self.protocol_text, query_lower)
             || contains_ascii_case_insensitive(self.state_text, query_lower)
             || self
@@ -668,7 +668,7 @@ impl App {
                 SortColumn::Port => a.port.cmp(&b.port).then_with(|| a.ip.cmp(&b.ip)),
                 SortColumn::Service => a
                     .service
-                    .cmp(b.service)
+                    .cmp(&b.service)
                     .then_with(|| a.ip.cmp(&b.ip))
                     .then_with(|| a.port.cmp(&b.port)),
                 SortColumn::Latency => a
@@ -1312,7 +1312,7 @@ impl App {
             if let Some(url) = crate::ui::quick_actions::web_url_for(
                 result.ip,
                 result.port,
-                result.service,
+                &result.service,
                 result.banner.as_deref(),
             ) {
                 ui.ctx().open_url(egui::OpenUrl::new_tab(url));
