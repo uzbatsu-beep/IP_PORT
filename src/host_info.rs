@@ -4,9 +4,32 @@
 use std::collections::HashMap;
 use std::io;
 use std::net::IpAddr;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::process::Command;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
+
+/// The platform DNS resolver does not guarantee a network timeout. Report
+/// measured duration, but never block the egui UI thread while resolving.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum PtrStatus {
+    #[default]
+    Disabled,
+    Resolved,
+    NoName,
+    Failed(String),
+}
+
+impl PtrStatus {
+    pub fn summary(&self) -> &str {
+        match self {
+            Self::Disabled => "Disabled",
+            Self::Resolved => "Resolved",
+            Self::NoName => "No PTR name",
+            Self::Failed(_) => "Resolver error",
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HostInfo {
@@ -14,6 +37,27 @@ pub struct HostInfo {
     pub mac: Option<String>,
     pub oui: Option<String>,
     pub vendor: Option<String>,
+    pub ptr_status: PtrStatus,
+    pub ptr_duration_ms: Option<u64>,
+    pub neighbor_error: Option<String>,
+}
+
+/// Map platform results without claiming all DNS lookup failures mean NXDOMAIN.
+fn classify_ptr(
+    ip: IpAddr,
+    result: io::Result<String>,
+) -> (Option<String>, PtrStatus) {
+    match result {
+        Ok(name) if !name.trim().is_empty() && name.trim() != ip.to_string() => {
+            (Some(name.trim().to_owned()), PtrStatus::Resolved)
+        }
+        Ok(_) => (None, PtrStatus::NoName),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => (None, PtrStatus::NoName),
+        Err(err) => {
+            let message: String = err.to_string().chars().take(240).collect();
+            (None, PtrStatus::Failed(message))
+        }
+    }
 }
 
 pub struct HostInfoWorker {
@@ -33,6 +77,7 @@ impl HostInfoWorker {
                 .name(format!("host-enrichment-{worker_idx}"))
                 .spawn(move || {
                     let mut neighbors = HashMap::new();
+                    let mut neighbor_error: Option<String> = None;
                     let mut last_refresh: Option<Instant> = None;
                     loop {
                         let ip = {
@@ -40,39 +85,41 @@ impl HostInfoWorker {
                             queue.recv()
                         };
                         let Ok(ip) = ip else { break };
-                        let hostname = if resolve_ptr {
-                            dns_lookup::lookup_addr(&ip)
-                                .ok()
-                                .filter(|name| !name.is_empty() && name != &ip.to_string())
+                        let (hostname, ptr_status, ptr_duration_ms) = if resolve_ptr {
+                            let started = Instant::now();
+                            let (name, status) = classify_ptr(ip, dns_lookup::lookup_addr(&ip));
+                            let elapsed = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+                            (name, status, Some(elapsed))
                         } else {
-                            None
+                            (None, PtrStatus::Disabled, None)
                         };
                         if neighbor_cache
-                            && last_refresh
-                                .is_none_or(|last| last.elapsed() >= Duration::from_secs(3))
+                            && last_refresh.is_none_or(|last| last.elapsed() >= Duration::from_secs(3))
                         {
-                            neighbors = read_neighbor_cache();
+                            match read_neighbor_cache() {
+                                Ok(found) => {
+                                    neighbors = found;
+                                    neighbor_error = None;
+                                }
+                                Err(err) => {
+                                    neighbors.clear();
+                                    neighbor_error = Some(err);
+                                }
+                            }
                             last_refresh = Some(Instant::now());
                         }
-                        let mac = if neighbor_cache {
-                            neighbors.get(&ip).cloned()
-                        } else {
-                            None
-                        };
+                        let mac = if neighbor_cache { neighbors.get(&ip).cloned() } else { None };
                         let oui = mac.as_deref().and_then(oui_prefix);
                         let vendor = mac.as_deref().and_then(oui_vendor).map(str::to_owned);
-                        if updates_sender
-                            .send((
-                                ip,
-                                HostInfo {
-                                    hostname,
-                                    mac,
-                                    oui,
-                                    vendor,
-                                },
-                            ))
-                            .is_err()
-                        {
+                        if updates_sender.send((ip, HostInfo {
+                            hostname,
+                            mac,
+                            oui,
+                            vendor,
+                            ptr_status,
+                            ptr_duration_ms,
+                            neighbor_error: neighbor_error.clone(),
+                        })).is_err() {
                             break;
                         }
                     }
@@ -81,8 +128,8 @@ impl HostInfoWorker {
         Ok(Self { sender, updates })
     }
 
-    pub fn submit(&self, ip: IpAddr) -> bool {
-        self.sender.try_send(ip).is_ok()
+    pub fn submit(&self, ip: IpAddr) -> Result<(), mpsc::TrySendError<IpAddr>> {
+        self.sender.try_send(ip)
     }
 
     pub fn try_recv(&self) -> Option<(IpAddr, HostInfo)> {
