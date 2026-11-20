@@ -202,7 +202,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     .on_hover_text("Read-only local operating system neighbor cache; no active discovery packets and no admin access required.");
                 ui.label(RichText::new("Neighbor-cache MACs are read-only. IEEE CSV imports are offline and do not send probes.")
                     .small().weak());
-                ui.horizontal_wrapped(|ui| {
+                ui.add_enabled_ui(!app.is_loading_oui(), |ui| {
+                    ui.horizontal_wrapped(|ui| {
                     if ui.button("Import IEEE CSV...")
                         .on_hover_text("Import official IEEE MA-L (oui.csv), MA-M (mam/oui28.csv), or MA-S (oui36.csv) data. Imports replace only that registry class.")
                         .clicked()
@@ -215,7 +216,14 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     if ui.button("Reset OUI").clicked() {
                         app.reset_oui_registry();
                     }
+                    });
                 });
+                if app.is_loading_oui() {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(RichText::new("Processing IEEE CSV in background...").small().weak());
+                    });
+                }
                 let (mal, mam, mas) = app.oui_registry.counts();
                 ui.label(RichText::new(format!("IEEE OUI entries: MA-L {mal} · MA-M {mam} · MA-S {mas}"))
                     .small().weak());

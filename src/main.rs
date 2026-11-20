@@ -4,6 +4,7 @@ mod app;
 mod export;
 mod host_info;
 mod oui_registry;
+mod oui_store;
 mod profile;
 mod scanner;
 mod ui;

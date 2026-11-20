@@ -1,9 +1,6 @@
 //! Optional IEEE Registration Authority CSV database: MA-L (24), MA-M (28),
 //! MA-S (36). User imports local official files; no network download or tracking.
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::Read;
-use std::path::Path;
 
 const MAX_CSV_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_ROWS: usize = 150_000;
@@ -54,6 +51,16 @@ fn globally_assigned(mac: &str) -> Option<u64> {
 }
 
 impl OuiRegistry {
+    /// Move a previously validated registry class into this database; other
+    /// classes stay available without cloning large vendor hash maps.
+    pub fn replace_kind_from(&mut self, kind: RegistryKind, mut imported: Self) {
+        match kind {
+            RegistryKind::MaL => self.ma_l = std::mem::take(&mut imported.ma_l),
+            RegistryKind::MaM => self.ma_m = std::mem::take(&mut imported.ma_m),
+            RegistryKind::MaS => self.ma_s = std::mem::take(&mut imported.ma_s),
+        }
+    }
+
     pub fn counts(&self) -> (usize, usize, usize) {
         (self.ma_l.len(), self.ma_m.len(), self.ma_s.len())
     }
@@ -70,19 +77,6 @@ impl OuiRegistry {
             return Some(vendor.clone());
         }
         crate::host_info::oui_vendor(mac).map(str::to_owned)
-    }
-
-    /// Atomic replacement of one IEEE registry; other imported registries stay.
-    pub fn load_file(&mut self, path: &Path) -> Result<(RegistryKind, usize), String> {
-        let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let mut bytes = Vec::new();
-        file.take(MAX_CSV_BYTES + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|e| format!("Cannot read IEEE CSV: {e}"))?;
-        if bytes.len() as u64 > MAX_CSV_BYTES {
-            return Err("IEEE CSV exceeds 16 MiB safety limit".to_owned());
-        }
-        self.load_csv(&bytes)
     }
 
     pub fn load_csv(&mut self, input: &[u8]) -> Result<(RegistryKind, usize), String> {
