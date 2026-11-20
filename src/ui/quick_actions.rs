@@ -104,7 +104,7 @@ pub fn show_row_context_menu(app: &mut App, entry: &ResultRow, ui: &mut egui::Ui
     let proto = entry.raw.protocol.as_str();
     let ip = entry.raw.ip;
     let port = entry.raw.port;
-    let service = entry.raw.service;
+    let service = entry.raw.service.as_str();
     let banner = entry.raw.banner.as_deref();
     let web_url = web_url_for(ip, port, service, banner);
 
@@ -184,7 +184,7 @@ pub fn show_row_context_menu(app: &mut App, entry: &ResultRow, ui: &mut egui::Ui
             "port": entry.raw.port,
             "protocol": entry.raw.protocol.as_str(),
             "state": entry.raw.state.as_str(),
-            "service": entry.raw.service,
+            "service": entry.raw.service.as_str(),
             "rtt_ms": (entry.raw.rtt.as_secs_f64() * 1000.0 * 100.0).round() / 100.0,
             "banner": entry.raw.banner,
         });
@@ -259,7 +259,7 @@ pub fn show_inspector_toolbar(app: &mut App, entry_idx: usize, ui: &mut Ui) {
     let entry = app.row(entry_idx).clone();
     let ip = entry.raw.ip;
     let port = entry.raw.port;
-    let service = entry.raw.service;
+    let service = entry.raw.service.as_str();
     let banner = entry.raw.banner.as_deref();
     let web_url = web_url_for(ip, port, service, banner);
 
