@@ -74,7 +74,7 @@ fn insert_neighbor(cache: &mut NeighborCache, ip: IpAddr, mac: String, interface
         records.push(NeighborRecord { mac, interface });
     }
 }
-#[cfg(any(not(target_os = "windows"), test))]
+#[cfg(not(target_os = "windows"))]
 fn merge_neighbors(cache: &mut NeighborCache, additional: NeighborCache) {
     for (ip, entries) in additional {
         for entry in entries {
