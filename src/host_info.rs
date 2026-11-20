@@ -67,7 +67,10 @@ pub struct NeighborRecord {
 pub type NeighborCache = HashMap<IpAddr, Vec<NeighborRecord>>;
 fn insert_neighbor(cache: &mut NeighborCache, ip: IpAddr, mac: String, interface: String) {
     let records = cache.entry(ip).or_default();
-    if !records.iter().any(|r| r.mac == mac && r.interface == interface) {
+    if !records
+        .iter()
+        .any(|r| r.mac == mac && r.interface == interface)
+    {
         records.push(NeighborRecord { mac, interface });
     }
 }
@@ -80,11 +83,12 @@ fn merge_neighbors(cache: &mut NeighborCache, additional: NeighborCache) {
     }
 }
 /// Never assign an arbitrary MAC when the IP is present on multiple adapters.
-pub fn select_neighbor(cache: &NeighborCache, ip: &IpAddr)
-    -> (Option<String>, Vec<String>, bool)
-{
-    let Some(rows) = cache.get(ip) else { return (None, Vec::new(), false) };
-    let interfaces = rows.iter()
+pub fn select_neighbor(cache: &NeighborCache, ip: &IpAddr) -> (Option<String>, Vec<String>, bool) {
+    let Some(rows) = cache.get(ip) else {
+        return (None, Vec::new(), false);
+    };
+    let interfaces = rows
+        .iter()
         .map(|entry| format!("{} — {}", entry.interface, entry.mac))
         .collect();
     if rows.len() != 1 {
@@ -253,7 +257,8 @@ pub fn parse_neighbor_cache(output: &str) -> NeighborCache {
         for token in &tokens {
             let clean = token.trim_matches(|c| c == '(' || c == ')' || c == '?' || c == ',');
             if ip.is_none() {
-                let (bare, interface) = clean.split_once('%')
+                let (bare, interface) = clean
+                    .split_once('%')
                     .map_or((clean, None), |(address, scope)| (address, Some(scope)));
                 if let Ok(address) = bare.parse::<IpAddr>() {
                     ip = Some(address);
@@ -265,12 +270,15 @@ pub fn parse_neighbor_cache(output: &str) -> NeighborCache {
             }
         }
         if let (Some(ip), Some(mac)) = (ip, mac) {
-            let interface = tokens.windows(2).find_map(|pair| {
-                (pair[0] == "dev" || pair[0] == "on").then(|| pair[1].to_owned())
-            }).or_else(|| {
-                (tokens.len() >= 6 && tokens[1].starts_with("0x"))
-                    .then(|| tokens.last().unwrap_or(&"unknown").to_string())
-            }).or(zone).unwrap_or_else(|| "unknown interface".to_owned());
+            let interface = tokens
+                .windows(2)
+                .find_map(|pair| (pair[0] == "dev" || pair[0] == "on").then(|| pair[1].to_owned()))
+                .or_else(|| {
+                    (tokens.len() >= 6 && tokens[1].starts_with("0x"))
+                        .then(|| tokens.last().unwrap_or(&"unknown").to_string())
+                })
+                .or(zone)
+                .unwrap_or_else(|| "unknown interface".to_owned());
             insert_neighbor(&mut map, ip, mac, interface);
         }
     }
@@ -296,9 +304,10 @@ fn read_neighbor_cache() -> Result<NeighborCache, String> {
             if let Ok(output) = Command::new("ip").args(["-6", "neigh", "show"]).output()
                 && output.status.success()
             {
-                merge_neighbors(&mut neighbors, parse_neighbor_cache(&String::from_utf8_lossy(
-                    &output.stdout,
-                )));
+                merge_neighbors(
+                    &mut neighbors,
+                    parse_neighbor_cache(&String::from_utf8_lossy(&output.stdout)),
+                );
                 any_source = true;
             }
         }
@@ -307,17 +316,19 @@ fn read_neighbor_cache() -> Result<NeighborCache, String> {
             if let Ok(output) = Command::new("arp").arg("-an").output()
                 && output.status.success()
             {
-                merge_neighbors(&mut neighbors, parse_neighbor_cache(&String::from_utf8_lossy(
-                    &output.stdout,
-                )));
+                merge_neighbors(
+                    &mut neighbors,
+                    parse_neighbor_cache(&String::from_utf8_lossy(&output.stdout)),
+                );
                 any_source = true;
             }
             if let Ok(output) = Command::new("ndp").arg("-an").output()
                 && output.status.success()
             {
-                merge_neighbors(&mut neighbors, parse_neighbor_cache(&String::from_utf8_lossy(
-                    &output.stdout,
-                )));
+                merge_neighbors(
+                    &mut neighbors,
+                    parse_neighbor_cache(&String::from_utf8_lossy(&output.stdout)),
+                );
                 any_source = true;
             }
         }
@@ -387,7 +398,12 @@ fn read_windows_neighbor_cache() -> Result<NeighborCache, String> {
             .collect::<Vec<_>>()
             .join(":");
         if let Some(valid) = normalize_mac(&mac) {
-            insert_neighbor(&mut neighbors, ip, valid, format!("ifIndex {}", row.InterfaceIndex));
+            insert_neighbor(
+                &mut neighbors,
+                ip,
+                valid,
+                format!("ifIndex {}", row.InterfaceIndex),
+            );
         }
     }
     Ok(neighbors)
@@ -406,13 +422,27 @@ mod tests {
             fe80::2%en0 dev en0 lladdr 00:00:0c:aa:bb:cc REACHABLE";
         let table = parse_neighbor_cache(data);
         let ip: IpAddr = "192.168.1.2".parse().unwrap();
-        assert_eq!(select_neighbor(&table, &ip).0.as_deref(), Some("B8:27:EB:12:34:56"));
+        assert_eq!(
+            select_neighbor(&table, &ip).0.as_deref(),
+            Some("B8:27:EB:12:34:56")
+        );
         assert_eq!(table[&ip][0].interface, "eth0");
-        assert_eq!(select_neighbor(&table, &"192.168.1.3".parse().unwrap()).0.as_deref(), Some("00:1B:21:AA:BB:CC"));
+        assert_eq!(
+            select_neighbor(&table, &"192.168.1.3".parse().unwrap())
+                .0
+                .as_deref(),
+            Some("00:1B:21:AA:BB:CC")
+        );
         let v6: IpAddr = "fe80::2".parse().unwrap();
-        assert_eq!(select_neighbor(&table, &v6).0.as_deref(), Some("00:00:0C:AA:BB:CC"));
+        assert_eq!(
+            select_neighbor(&table, &v6).0.as_deref(),
+            Some("00:00:0C:AA:BB:CC")
+        );
         assert_eq!(table[&v6][0].interface, "en0");
-        assert_eq!(oui_vendor(&table[&ip][0].mac), Some("Raspberry Pi Foundation"));
+        assert_eq!(
+            oui_vendor(&table[&ip][0].mac),
+            Some("Raspberry Pi Foundation")
+        );
     }
 
     #[cfg(target_os = "windows")]
@@ -434,8 +464,18 @@ mod tests {
     fn same_ipv6_linklocal_on_two_adapters_is_not_misattributed() {
         let ip: IpAddr = "fe80::1234".parse().unwrap();
         let mut cache = NeighborCache::new();
-        insert_neighbor(&mut cache, ip, "00:1B:21:11:22:33".to_owned(), "ifIndex 4".to_owned());
-        insert_neighbor(&mut cache, ip, "00:1B:21:AA:BB:CC".to_owned(), "ifIndex 12".to_owned());
+        insert_neighbor(
+            &mut cache,
+            ip,
+            "00:1B:21:11:22:33".to_owned(),
+            "ifIndex 4".to_owned(),
+        );
+        insert_neighbor(
+            &mut cache,
+            ip,
+            "00:1B:21:AA:BB:CC".to_owned(),
+            "ifIndex 12".to_owned(),
+        );
         let (mac, interfaces, ambiguous) = select_neighbor(&cache, &ip);
         assert!(mac.is_none());
         assert!(ambiguous);

@@ -699,14 +699,20 @@ impl App {
 
     fn refresh_oui_vendors(&mut self) {
         for info in self.host_info.values_mut() {
-            info.vendor = info.mac.as_deref().and_then(|mac| self.oui_registry.lookup(mac));
+            info.vendor = info
+                .mac
+                .as_deref()
+                .and_then(|mac| self.oui_registry.lookup(mac));
         }
         self.view_dirty = true;
     }
 
     fn drain_host_enrichment(&mut self, ctx: &egui::Context) {
         for _ in 0..128 {
-            let next = self.host_info_worker.as_ref().and_then(HostInfoWorker::try_recv);
+            let next = self
+                .host_info_worker
+                .as_ref()
+                .and_then(HostInfoWorker::try_recv);
             let Some(event) = next else { break };
             match event {
                 HostInfoEvent::Started(ip) => {
@@ -718,13 +724,18 @@ impl App {
                     self.host_info_pending.remove(&ip);
                     self.host_info_inflight.remove(&ip);
                     let was_overdue = self.host_info_overdue.remove(&ip);
-                    if self.resolve_ptr && (was_overdue
-                        || info.ptr_duration_ms.is_some_and(|ms| ms >= self.ptr_soft_deadline_ms))
+                    if self.resolve_ptr
+                        && (was_overdue
+                            || info
+                                .ptr_duration_ms
+                                .is_some_and(|ms| ms >= self.ptr_soft_deadline_ms))
                         && !was_overdue
                     {
                         self.host_info_stats.ptr_over_limit += 1;
                     }
-                    info.vendor = info.mac.as_deref()
+                    info.vendor = info
+                        .mac
+                        .as_deref()
                         .and_then(|mac| self.oui_registry.lookup(mac));
                     self.host_info_stats.completed += 1;
                     match &info.ptr_status {
@@ -1545,7 +1556,8 @@ mod tests {
         app.resolve_ptr = true;
         app.ptr_soft_deadline_ms = 500;
         let ip = IpAddr::from([192, 0, 2, 15]);
-        app.host_info_inflight.insert(ip, Instant::now() - Duration::from_secs(2));
+        app.host_info_inflight
+            .insert(ip, Instant::now() - Duration::from_secs(2));
         let ctx = egui::Context::default();
         app.drain_host_enrichment(&ctx);
         app.drain_host_enrichment(&ctx);

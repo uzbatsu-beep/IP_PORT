@@ -83,7 +83,8 @@ impl OuiRegistry {
     pub fn load_file(&mut self, path: &Path) -> Result<(RegistryKind, usize), String> {
         let file = File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut bytes = Vec::new();
-        file.take(MAX_CSV_BYTES + 1).read_to_end(&mut bytes)
+        file.take(MAX_CSV_BYTES + 1)
+            .read_to_end(&mut bytes)
             .map_err(|e| format!("Cannot read IEEE CSV: {e}"))?;
         if bytes.len() as u64 > MAX_CSV_BYTES {
             return Err("IEEE CSV exceeds 16 MiB safety limit".to_owned());
@@ -99,12 +100,18 @@ impl OuiRegistry {
             .flexible(true)
             .trim(csv::Trim::All)
             .from_reader(input);
-        let headers = reader.headers().map_err(|e| format!("Invalid CSV header: {e}"))?;
-        let names: Vec<String> = headers.iter().map(|s| s.trim_start_matches('\u{feff}').to_ascii_lowercase()).collect();
+        let headers = reader
+            .headers()
+            .map_err(|e| format!("Invalid CSV header: {e}"))?;
+        let names: Vec<String> = headers
+            .iter()
+            .map(|s| s.trim_start_matches('\u{feff}').to_ascii_lowercase())
+            .collect();
         let find = |name: &str| names.iter().position(|n| n == name);
         let registry_col = find("registry").ok_or("Missing IEEE CSV field 'Registry'")?;
         let assignment_col = find("assignment").ok_or("Missing IEEE CSV field 'Assignment'")?;
-        let vendor_col = find("organization name").ok_or("Missing IEEE CSV field 'Organization Name'")?;
+        let vendor_col =
+            find("organization name").ok_or("Missing IEEE CSV field 'Organization Name'")?;
         let mut entries = HashMap::new();
         let mut kind = None;
         for (line, row) in reader.records().enumerate() {
@@ -126,7 +133,10 @@ impl OuiRegistry {
                 || vendor.is_empty()
                 || vendor.len() > 512
             {
-                return Err(format!("Invalid IEEE assignment/registry/vendor at row {}", line + 2));
+                return Err(format!(
+                    "Invalid IEEE assignment/registry/vendor at row {}",
+                    line + 2
+                ));
             }
             if kind.is_some_and(|existing| existing != row_kind) {
                 return Err("One IEEE CSV file must contain only one registry class".to_owned());
@@ -158,21 +168,45 @@ mod tests {
     fn csv_longest_prefix_and_quoted_names() {
         let mut db = OuiRegistry::default();
         assert_eq!(db.load_csv(b"Registry,Assignment,Organization Name,Organization Address\nMA-L,001B21,\"Example, Systems\",Somewhere\n").unwrap(), (RegistryKind::MaL, 1));
-        assert_eq!(db.load_csv(b"Registry,Assignment,Organization Name\nMA-M,001B21A,Medium Inc\n").unwrap(), (RegistryKind::MaM, 1));
-        assert_eq!(db.load_csv(b"Registry,Assignment,Organization Name\nMA-S,001B21A12,Specific Co\n").unwrap(), (RegistryKind::MaS, 1));
-        assert_eq!(db.lookup("00:1B:21:A1:2F:34").as_deref(), Some("Specific Co"));
-        assert_eq!(db.lookup("00:1B:21:A2:00:00").as_deref(), Some("Medium Inc"));
-        assert_eq!(db.lookup("00:1B:21:FF:00:00").as_deref(), Some("Example, Systems"));
+        assert_eq!(
+            db.load_csv(b"Registry,Assignment,Organization Name\nMA-M,001B21A,Medium Inc\n")
+                .unwrap(),
+            (RegistryKind::MaM, 1)
+        );
+        assert_eq!(
+            db.load_csv(b"Registry,Assignment,Organization Name\nMA-S,001B21A12,Specific Co\n")
+                .unwrap(),
+            (RegistryKind::MaS, 1)
+        );
+        assert_eq!(
+            db.lookup("00:1B:21:A1:2F:34").as_deref(),
+            Some("Specific Co")
+        );
+        assert_eq!(
+            db.lookup("00:1B:21:A2:00:00").as_deref(),
+            Some("Medium Inc")
+        );
+        assert_eq!(
+            db.lookup("00:1B:21:FF:00:00").as_deref(),
+            Some("Example, Systems")
+        );
         assert!(db.lookup("02:1B:21:A1:2F:34").is_none());
     }
 
     #[test]
     fn failed_import_preserves_previous_registry() {
         let mut db = OuiRegistry::default();
-        db.load_csv(b"Registry,Assignment,Organization Name\nMA-L,001B21,Test Vendor\n").unwrap();
-        assert!(db.load_csv(b"Registry,Assignment,Organization Name\nMA-L,BAD,Broken\n").is_err());
+        db.load_csv(b"Registry,Assignment,Organization Name\nMA-L,001B21,Test Vendor\n")
+            .unwrap();
+        assert!(
+            db.load_csv(b"Registry,Assignment,Organization Name\nMA-L,BAD,Broken\n")
+                .is_err()
+        );
         assert_eq!(db.counts(), (1, 0, 0));
-        assert_eq!(db.lookup("00:1B:21:00:00:01").as_deref(), Some("Test Vendor"));
+        assert_eq!(
+            db.lookup("00:1B:21:00:00:01").as_deref(),
+            Some("Test Vendor")
+        );
         db.reset();
         assert_eq!(db.counts(), (0, 0, 0));
     }
