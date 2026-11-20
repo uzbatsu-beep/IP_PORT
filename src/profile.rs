@@ -7,6 +7,10 @@ use crate::scanner::targets;
 
 const PROFILE_VERSION: u32 = 1;
 
+fn default_ptr_soft_deadline_ms() -> u64 {
+    3_000
+}
+
 fn default_banner_timeout_ms() -> u64 {
     1000
 }
@@ -33,6 +37,8 @@ pub struct ScanProfile {
     pub resolve_ptr: bool,
     #[serde(default)]
     pub read_neighbor_cache: bool,
+    #[serde(default = "default_ptr_soft_deadline_ms")]
+    pub ptr_soft_deadline_ms: u64,
 }
 
 impl ScanProfile {
@@ -60,6 +66,7 @@ impl ScanProfile {
             exclusions: String::new(),
             resolve_ptr: false,
             read_neighbor_cache: false,
+            ptr_soft_deadline_ms: default_ptr_soft_deadline_ms(),
         }
     }
 
@@ -85,6 +92,9 @@ impl ScanProfile {
         }
         if !(1..=1024).contains(&self.concurrency) {
             return Err("Concurrency must be between 1 and 1024".to_owned());
+        }
+        if !(500..=30_000).contains(&self.ptr_soft_deadline_ms) {
+            return Err("PTR warning deadline must be between 500 and 30000 ms".to_owned());
         }
         if !(100..=5000).contains(&self.banner_timeout_ms) {
             return Err("Banner timeout must be between 100 and 5000 ms".to_owned());
