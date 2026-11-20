@@ -52,7 +52,7 @@ pub fn services_count() -> usize {
 
 /// Таблица соответствия портов (массив на 65 536 портов для мгновенного O(1) поиска без хэширования).
 pub struct ServicesDb {
-    table: Box<[Option<&'static str>; 65536]>,
+    table: Box<[Option<&'static str>]>,
     source_description: String,
     total_loaded: usize,
 }
@@ -61,7 +61,12 @@ impl ServicesDb {
     /// Создаёт пустую таблицу.
     pub fn new() -> Self {
         Self {
-            table: Box::new([None; 65536]),
+            // Allocate the ~1 MiB lookup table directly on the heap.
+            // Box::new([None; 65536]) can first build a huge temporary array
+            // on the calling thread's stack (often only 1 MiB on Windows).
+            // Lazy initialization from the Services database UI then risks
+            // a stack overflow and aborts the whole process.
+            table: vec![None; 65_536].into_boxed_slice(),
             source_description: "Empty".to_owned(),
             total_loaded: 0,
         }
@@ -358,6 +363,34 @@ impl Default for ServicesDb {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn services_database_can_initialize_on_a_small_ui_thread_stack() {
+        // This test catches large temporary stack allocations when creating
+        // the 65_536-slot service database. Windows GUI main threads typically
+        // have a much smaller stack than Rust's test harness threads.
+        std::thread::Builder::new()
+            .name("services-ui-small-stack".to_owned())
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                let mut db = ServicesDb::new();
+                assert!(db.get(443).is_none());
+                db.set(443, "https");
+                assert_eq!(db.get(443), Some("https"));
+
+                // Model first opening the collapsed UI panel, when LazyLock
+                // initializes the database on the current (small-stack) thread.
+                let lazy = LazyLock::new(|| RwLock::new(ServicesDb::default_builtin()));
+                let info = lazy.read().unwrap().source_info().to_owned();
+                assert!(info.contains("Built-in"));
+                let builtin = ServicesDb::default_builtin();
+                assert_eq!(builtin.get(22), Some("ssh"));
+                assert!(builtin.source_info().contains("Built-in"));
+            })
+            .expect("could not spawn small-stack test thread")
+            .join()
+            .expect("service database initialization on small stack failed");
+    }
 
     #[test]
     fn parses_nmap_services_format() {
