@@ -628,10 +628,17 @@ impl App {
     /// is silently dropped when more than 512 unique IPs arrive in a burst.
     fn flush_host_info_backlog(&mut self) {
         for _ in 0..64 {
-            let Some(&ip) = self.host_info_backlog.front() else { break };
-            let next = self.host_info_worker.as_ref().map(|worker| worker.submit(ip));
+            let Some(&ip) = self.host_info_backlog.front() else {
+                break;
+            };
+            let next = self
+                .host_info_worker
+                .as_ref()
+                .map(|worker| worker.submit(ip));
             match next {
-                Some(Ok(())) => { self.host_info_backlog.pop_front(); }
+                Some(Ok(())) => {
+                    self.host_info_backlog.pop_front();
+                }
                 Some(Err(std::sync::mpsc::TrySendError::Full(_))) => break,
                 Some(Err(std::sync::mpsc::TrySendError::Disconnected(_))) => {
                     self.host_info_worker = None;
@@ -686,7 +693,8 @@ impl App {
         if self.host_info_worker.is_some() {
             if self.host_info_pending.is_empty()
                 && self.host_info_backlog.is_empty()
-                && !self.is_running() {
+                && !self.is_running()
+            {
                 self.host_info_worker = None;
             } else {
                 ctx.request_repaint_after(Duration::from_millis(125));
@@ -1468,9 +1476,7 @@ mod tests {
         let total = 850usize;
         for n in 0..total {
             let ip = IpAddr::from([10, 42, (n / 256) as u8, (n % 256) as u8]);
-            app.push_result(ScanResult::new(
-                ip, 80, "test", Duration::from_millis(1),
-            ));
+            app.push_result(ScanResult::new(ip, 80, "test", Duration::from_millis(1)));
         }
         assert_eq!(app.host_info_pending_len(), total);
         let context = egui::Context::default();

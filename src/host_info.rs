@@ -43,10 +43,7 @@ pub struct HostInfo {
 }
 
 /// Map platform results without claiming all DNS lookup failures mean NXDOMAIN.
-fn classify_ptr(
-    ip: IpAddr,
-    result: io::Result<String>,
-) -> (Option<String>, PtrStatus) {
+fn classify_ptr(ip: IpAddr, result: io::Result<String>) -> (Option<String>, PtrStatus) {
     match result {
         Ok(name) if !name.trim().is_empty() && name.trim() != ip.to_string() => {
             (Some(name.trim().to_owned()), PtrStatus::Resolved)
@@ -88,13 +85,15 @@ impl HostInfoWorker {
                         let (hostname, ptr_status, ptr_duration_ms) = if resolve_ptr {
                             let started = Instant::now();
                             let (name, status) = classify_ptr(ip, dns_lookup::lookup_addr(&ip));
-                            let elapsed = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+                            let elapsed =
+                                started.elapsed().as_millis().min(u64::MAX as u128) as u64;
                             (name, status, Some(elapsed))
                         } else {
                             (None, PtrStatus::Disabled, None)
                         };
                         if neighbor_cache
-                            && last_refresh.is_none_or(|last| last.elapsed() >= Duration::from_secs(3))
+                            && last_refresh
+                                .is_none_or(|last| last.elapsed() >= Duration::from_secs(3))
                         {
                             match read_neighbor_cache() {
                                 Ok(found) => {
@@ -108,18 +107,28 @@ impl HostInfoWorker {
                             }
                             last_refresh = Some(Instant::now());
                         }
-                        let mac = if neighbor_cache { neighbors.get(&ip).cloned() } else { None };
+                        let mac = if neighbor_cache {
+                            neighbors.get(&ip).cloned()
+                        } else {
+                            None
+                        };
                         let oui = mac.as_deref().and_then(oui_prefix);
                         let vendor = mac.as_deref().and_then(oui_vendor).map(str::to_owned);
-                        if updates_sender.send((ip, HostInfo {
-                            hostname,
-                            mac,
-                            oui,
-                            vendor,
-                            ptr_status,
-                            ptr_duration_ms,
-                            neighbor_error: neighbor_error.clone(),
-                        })).is_err() {
+                        if updates_sender
+                            .send((
+                                ip,
+                                HostInfo {
+                                    hostname,
+                                    mac,
+                                    oui,
+                                    vendor,
+                                    ptr_status,
+                                    ptr_duration_ms,
+                                    neighbor_error: neighbor_error.clone(),
+                                },
+                            ))
+                            .is_err()
+                        {
                             break;
                         }
                     }
@@ -230,7 +239,9 @@ fn read_neighbor_cache() -> Result<HashMap<IpAddr, String>, String> {
             if let Ok(output) = Command::new("ip").args(["-6", "neigh", "show"]).output()
                 && output.status.success()
             {
-                neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(&output.stdout)));
+                neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(
+                    &output.stdout,
+                )));
                 any_source = true;
             }
         }
@@ -239,13 +250,17 @@ fn read_neighbor_cache() -> Result<HashMap<IpAddr, String>, String> {
             if let Ok(output) = Command::new("arp").arg("-an").output()
                 && output.status.success()
             {
-                neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(&output.stdout)));
+                neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(
+                    &output.stdout,
+                )));
                 any_source = true;
             }
             if let Ok(output) = Command::new("ndp").arg("-an").output()
                 && output.status.success()
             {
-                neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(&output.stdout)));
+                neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(
+                    &output.stdout,
+                )));
                 any_source = true;
             }
         }
@@ -299,7 +314,9 @@ fn read_windows_neighbor_cache() -> Result<HashMap<IpAddr, String>, String> {
         // SAFETY: The si_family discriminant selects the active sockaddr union field.
         let ip = unsafe {
             if row.Address.si_family == AF_INET {
-                IpAddr::V4(Ipv4Addr::from(row.Address.Ipv4.sin_addr.S_un.S_addr.to_ne_bytes()))
+                IpAddr::V4(Ipv4Addr::from(
+                    row.Address.Ipv4.sin_addr.S_un.S_addr.to_ne_bytes(),
+                ))
             } else if row.Address.si_family == AF_INET6 {
                 IpAddr::V6(Ipv6Addr::from(row.Address.Ipv6.sin6_addr.u.Byte))
             } else {
@@ -307,8 +324,11 @@ fn read_windows_neighbor_cache() -> Result<HashMap<IpAddr, String>, String> {
             }
         };
         let mac_bytes = &row.PhysicalAddress[..6];
-        let mac = mac_bytes.iter().map(|b| format!("{b:02X}"))
-            .collect::<Vec<_>>().join(":");
+        let mac = mac_bytes
+            .iter()
+            .map(|b| format!("{b:02X}"))
+            .collect::<Vec<_>>()
+            .join(":");
         if let Some(valid) = normalize_mac(&mac) {
             neighbors.insert(ip, valid);
         }
@@ -360,7 +380,10 @@ mod tests {
         assert_eq!(state, PtrStatus::NoName);
         let (_, state) = classify_ptr(
             ip,
-            Err(io::Error::new(io::ErrorKind::TimedOut, "synthetic resolver timeout")),
+            Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "synthetic resolver timeout",
+            )),
         );
         assert!(matches!(state, PtrStatus::Failed(reason) if reason.contains("timeout")));
     }
