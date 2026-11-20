@@ -92,9 +92,13 @@ pub fn select_neighbor(cache: &NeighborCache, ip: &IpAddr)
     (Some(rows[0].mac.clone()), interfaces, false)
 }
 
+pub enum HostInfoEvent {
+    Started(IpAddr),
+    Finished(IpAddr, HostInfo),
+}
 pub struct HostInfoWorker {
     sender: mpsc::SyncSender<IpAddr>,
-    updates: mpsc::Receiver<(IpAddr, HostInfo)>,
+    updates: mpsc::Receiver<HostInfoEvent>,
 }
 
 impl HostInfoWorker {
@@ -117,6 +121,9 @@ impl HostInfoWorker {
                             queue.recv()
                         };
                         let Ok(ip) = ip else { break };
+                        if updates_sender.send(HostInfoEvent::Started(ip)).is_err() {
+                            break;
+                        }
                         let (hostname, ptr_status, ptr_duration_ms) = if resolve_ptr {
                             let started = Instant::now();
                             let (name, status) = classify_ptr(ip, dns_lookup::lookup_addr(&ip));
@@ -150,7 +157,7 @@ impl HostInfoWorker {
                         let oui = mac.as_deref().and_then(oui_prefix);
                         let vendor = mac.as_deref().and_then(oui_vendor).map(str::to_owned);
                         if updates_sender
-                            .send((
+                            .send(HostInfoEvent::Finished(
                                 ip,
                                 HostInfo {
                                     hostname,
@@ -178,7 +185,7 @@ impl HostInfoWorker {
         self.sender.try_send(ip)
     }
 
-    pub fn try_recv(&self) -> Option<(IpAddr, HostInfo)> {
+    pub fn try_recv(&self) -> Option<HostInfoEvent> {
         self.updates.try_recv().ok()
     }
 }
