@@ -499,7 +499,9 @@ where
                     confirmed_service,
                 } = &outcome
                 {
-                    let service = confirmed_service.map(str::to_owned).unwrap_or_else(|| probe::service_name(port));
+                    let service = confirmed_service
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| probe::service_name(port));
                     let result = ScanResult {
                         ip,
                         port,
@@ -518,7 +520,9 @@ where
                     confirmed_service,
                 } = &outcome
                 {
-                    let service = confirmed_service.map(str::to_owned).unwrap_or_else(|| probe::service_name(port));
+                    let service = confirmed_service
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| probe::service_name(port));
                     let result = ScanResult {
                         ip,
                         port,
