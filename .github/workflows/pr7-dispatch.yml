@@ -1,0 +1,25 @@
+name: Dispatch PR7 full CI
+on:
+  push:
+    branches: [feat/pr-7-ieee-oui-interface-ptr-deadlines]
+    paths: [.github/workflows/pr7-dispatch.yml]
+permissions:
+  contents: write
+  actions: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove temporary workflow and run standard CI on PR7 branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/pr7-dispatch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: remove one-time PR7 full-CI launcher"
+          git push origin HEAD:refs/heads/feat/pr-7-ieee-oui-interface-ptr-deadlines
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref feat/pr-7-ieee-oui-interface-ptr-deadlines
