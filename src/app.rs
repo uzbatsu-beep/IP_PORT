@@ -3,7 +3,8 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crate::host_info::{HostInfo, HostInfoWorker, PtrStatus};
+use crate::host_info::{HostInfo, HostInfoEvent, HostInfoWorker, PtrStatus};
+use crate::oui_registry::OuiRegistry;
 use crate::scanner::{
     self, PortState, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
 };
@@ -307,6 +308,7 @@ pub struct HostInfoStats {
     pub ptr_failed: usize,
     pub mac_found: usize,
     pub neighbor_failed: usize,
+    pub ptr_over_limit: usize,
     pub last_ptr_error: Option<String>,
     pub last_neighbor_error: Option<String>,
 }
@@ -318,9 +320,14 @@ pub struct App {
     pub exclusions_input: String,
     pub resolve_ptr: bool,
     pub read_neighbor_cache: bool,
+    pub ptr_soft_deadline_ms: u64,
+    pub oui_registry: OuiRegistry,
+    pub oui_status: String,
     pub host_info: HashMap<IpAddr, HostInfo>,
     host_info_pending: HashSet<IpAddr>,
     host_info_backlog: VecDeque<IpAddr>,
+    host_info_inflight: HashMap<IpAddr, Instant>,
+    host_info_overdue: HashSet<IpAddr>,
     pub host_info_stats: HostInfoStats,
     host_info_worker: Option<HostInfoWorker>,
     pub interfaces: Vec<crate::scanner::NetworkInterfaceInfo>,
@@ -393,9 +400,14 @@ impl App {
             exclusions_input,
             resolve_ptr: false,
             read_neighbor_cache: false,
+            ptr_soft_deadline_ms: 3_000,
+            oui_registry: OuiRegistry::default(),
+            oui_status: "Built-in OUI list".to_owned(),
             host_info: HashMap::new(),
             host_info_pending: HashSet::new(),
             host_info_backlog: VecDeque::new(),
+            host_info_inflight: HashMap::new(),
+            host_info_overdue: HashSet::new(),
             host_info_stats: HostInfoStats::default(),
             host_info_worker: None,
             interfaces: crate::scanner::interfaces::list_interfaces(),
@@ -660,34 +672,90 @@ impl App {
         self.host_info_pending.len()
     }
 
+    pub fn ptr_currently_overdue(&self) -> usize {
+        self.host_info_overdue.len()
+    }
+
+    pub fn load_oui_file(&mut self, path: &std::path::Path) {
+        match self.oui_registry.load_file(path) {
+            Ok((kind, count)) => {
+                self.oui_status = format!(
+                    "Loaded {count} {} assignments from {}",
+                    kind.label(),
+                    path.file_name().and_then(|p| p.to_str()).unwrap_or("CSV"),
+                );
+                self.refresh_oui_vendors();
+                self.show_toast(self.oui_status.clone());
+            }
+            Err(error) => self.show_toast(format!("IEEE OUI import failed: {error}")),
+        }
+    }
+
+    pub fn reset_oui_registry(&mut self) {
+        self.oui_registry.reset();
+        self.oui_status = "Built-in OUI list".to_owned();
+        self.refresh_oui_vendors();
+    }
+
+    fn refresh_oui_vendors(&mut self) {
+        for info in self.host_info.values_mut() {
+            info.vendor = info.mac.as_deref().and_then(|mac| self.oui_registry.lookup(mac));
+        }
+        self.view_dirty = true;
+    }
+
     fn drain_host_enrichment(&mut self, ctx: &egui::Context) {
         for _ in 0..128 {
-            let next = self
-                .host_info_worker
-                .as_ref()
-                .and_then(HostInfoWorker::try_recv);
-            let Some((ip, info)) = next else { break };
-            self.host_info_pending.remove(&ip);
-            self.host_info_stats.completed += 1;
-            match &info.ptr_status {
-                PtrStatus::Disabled => {}
-                PtrStatus::Resolved => self.host_info_stats.ptr_resolved += 1,
-                PtrStatus::NoName => self.host_info_stats.ptr_no_name += 1,
-                PtrStatus::Failed(message) => {
-                    self.host_info_stats.ptr_failed += 1;
-                    self.host_info_stats.last_ptr_error = Some(format!("{ip}: {message}"));
+            let next = self.host_info_worker.as_ref().and_then(HostInfoWorker::try_recv);
+            let Some(event) = next else { break };
+            match event {
+                HostInfoEvent::Started(ip) => {
+                    if self.resolve_ptr {
+                        self.host_info_inflight.insert(ip, Instant::now());
+                    }
+                }
+                HostInfoEvent::Finished(ip, mut info) => {
+                    self.host_info_pending.remove(&ip);
+                    self.host_info_inflight.remove(&ip);
+                    let was_overdue = self.host_info_overdue.remove(&ip);
+                    if self.resolve_ptr && (was_overdue
+                        || info.ptr_duration_ms.is_some_and(|ms| ms >= self.ptr_soft_deadline_ms))
+                        && !was_overdue
+                    {
+                        self.host_info_stats.ptr_over_limit += 1;
+                    }
+                    info.vendor = info.mac.as_deref()
+                        .and_then(|mac| self.oui_registry.lookup(mac));
+                    self.host_info_stats.completed += 1;
+                    match &info.ptr_status {
+                        PtrStatus::Disabled => {}
+                        PtrStatus::Resolved => self.host_info_stats.ptr_resolved += 1,
+                        PtrStatus::NoName => self.host_info_stats.ptr_no_name += 1,
+                        PtrStatus::Failed(message) => {
+                            self.host_info_stats.ptr_failed += 1;
+                            self.host_info_stats.last_ptr_error = Some(format!("{ip}: {message}"));
+                        }
+                    }
+                    if info.mac.is_some() {
+                        self.host_info_stats.mac_found += 1;
+                    }
+                    if let Some(message) = &info.neighbor_error {
+                        self.host_info_stats.neighbor_failed += 1;
+                        self.host_info_stats.last_neighbor_error = Some(message.clone());
+                    }
+                    self.host_info.insert(ip, info);
+                    self.view_dirty = true;
                 }
             }
-            if info.mac.is_some() {
-                self.host_info_stats.mac_found += 1;
+        }
+        // A soft deadline is an alert only. getnameinfo may continue blocking
+        // on a worker; do not report it as forcibly cancelled or requeue it.
+        for (&ip, &started) in &self.host_info_inflight {
+            if started.elapsed() >= Duration::from_millis(self.ptr_soft_deadline_ms)
+                && self.host_info_overdue.insert(ip)
+            {
+                self.host_info_stats.ptr_over_limit += 1;
             }
-            if let Some(message) = &info.neighbor_error {
-                self.host_info_stats.neighbor_failed += 1;
-                self.host_info_stats.last_neighbor_error = Some(message.clone());
-            }
-            self.host_info.insert(ip, info);
-            // Metadata can affect displayed rows and future filter matches.
-            self.view_dirty = true;
         }
         self.flush_host_info_backlog();
         if self.host_info_worker.is_some() {
@@ -1051,6 +1119,8 @@ impl App {
         self.host_info.clear();
         self.host_info_pending.clear();
         self.host_info_backlog.clear();
+        self.host_info_inflight.clear();
+        self.host_info_overdue.clear();
         self.host_info_stats = HostInfoStats::default();
         self.host_info_worker = None;
         self.cached_rtt_stats = None;
