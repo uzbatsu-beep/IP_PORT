@@ -1,6 +1,10 @@
 use std::fs;
+use std::io::Read;
 use std::path::Path;
 use std::sync::{LazyLock, RwLock};
+
+/// Maximum accepted services file size. Large or malformed inputs must not exhaust GUI memory.
+const MAX_SERVICES_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Глобальная база соответствия портов и сервисов (срез IANA/Nmap с поддержкой внешних файлов).
 static GLOBAL_SERVICES: LazyLock<RwLock<ServicesDb>> = LazyLock::new(|| {
@@ -10,20 +14,23 @@ static GLOBAL_SERVICES: LazyLock<RwLock<ServicesDb>> = LazyLock::new(|| {
 });
 
 /// Быстрое определение предполагаемого сервиса по номеру порта.
-pub fn service_name(port: u16) -> &'static str {
+pub fn service_name(port: u16) -> String {
+    // Return an owned snapshot: a subsequent load/reset may drop old DB entries.
     GLOBAL_SERVICES
         .read()
         .unwrap_or_else(|p| p.into_inner())
         .get(port)
         .unwrap_or("unknown")
+        .to_owned()
 }
 
 /// Загружает внешнюю базу соответствия портов (nmap-services, /etc/services или IANA CSV).
 pub fn load_services_file(path: &Path) -> Result<usize, String> {
-    GLOBAL_SERVICES
-        .write()
-        .unwrap_or_else(|p| p.into_inner())
-        .load_file(path)
+    // Parse and validate outside the global write lock so scanning can continue.
+    // Publish all updates atomically, only after a successful import.
+    let (next, count) = ServicesDb::from_file(path)?;
+    *GLOBAL_SERVICES.write().unwrap_or_else(|p| p.into_inner()) = next;
+    Ok(count)
 }
 
 /// Сбрасывает базу данных сервисов к встроенному срезу по умолчанию.
@@ -52,7 +59,7 @@ pub fn services_count() -> usize {
 
 /// Таблица соответствия портов (массив на 65 536 портов для мгновенного O(1) поиска без хэширования).
 pub struct ServicesDb {
-    table: Box<[Option<&'static str>]>,
+    table: Box<[Option<Box<str>>]>,
     source_description: String,
     total_loaded: usize,
 }
@@ -74,17 +81,16 @@ impl ServicesDb {
 
     /// Возвращает имя сервиса для порта, если оно определено.
     #[inline]
-    pub fn get(&self, port: u16) -> Option<&'static str> {
-        self.table[port as usize]
+    pub fn get(&self, port: u16) -> Option<&str> {
+        self.table[port as usize].as_deref()
     }
 
-    /// Устанавливает соответствие порта имени сервиса (сохраняя строку в 'static).
+    /// Stores an owned service name. Replacements and resets free old strings.
     pub fn set(&mut self, port: u16, name: &str) {
         if self.table[port as usize].is_none() {
             self.total_loaded += 1;
         }
-        let leaked: &'static str = Box::leak(name.to_owned().into_boxed_str());
-        self.table[port as usize] = Some(leaked);
+        self.table[port as usize] = Some(name.into());
     }
 
     /// Описание источника и количества загруженных сервисов.
@@ -182,11 +188,32 @@ impl ServicesDb {
         count
     }
 
-    /// Загружает базу данных сервисов из файла по указанному пути.
+    /// Loads a new snapshot transactionally: invalid files leave the current DB untouched.
+    /// Subsequent imports replace previous external overrides while retaining builtin ports.
     pub fn load_file(&mut self, path: &Path) -> Result<usize, String> {
-        let content = fs::read_to_string(path)
+        let (next, count) = Self::from_file(path)?;
+        *self = next;
+        Ok(count)
+    }
+
+    fn from_file(path: &Path) -> Result<(Self, usize), String> {
+        let input = fs::File::open(path)
+            .map_err(|err| format!("Failed to open {}: {err}", path.display()))?;
+        let mut content = String::new();
+        input
+            .take(MAX_SERVICES_FILE_BYTES + 1)
+            .read_to_string(&mut content)
             .map_err(|err| format!("Failed to read {}: {err}", path.display()))?;
-        let count = self.parse_str(&content);
+        if content.len() as u64 > MAX_SERVICES_FILE_BYTES {
+            return Err(format!(
+                "Services database is larger than the allowed {} MiB: {}",
+                MAX_SERVICES_FILE_BYTES / (1024 * 1024),
+                path.display()
+            ));
+        }
+
+        let mut next = Self::default_builtin();
+        let count = next.parse_str(&content);
         if count == 0 {
             return Err(format!(
                 "No TCP service definitions found in {}",
@@ -197,27 +224,25 @@ impl ServicesDb {
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("external file");
-        self.source_description = format!(
+        next.source_description = format!(
             "External: {} ({} TCP services)",
-            file_name, self.total_loaded
+            file_name, next.total_loaded
         );
-        Ok(count)
+        Ok((next, count))
     }
 
     /// Ищет локальные файлы nmap-services или переменную окружения IP_PORT_SERVICES_PATH.
     pub fn auto_discover(&mut self) {
         if let Ok(env_path) = std::env::var("IP_PORT_SERVICES_PATH") {
             let path = Path::new(&env_path);
-            if path.is_file() {
-                let _ = self.load_file(path);
+            if path.is_file() && self.load_file(path).is_ok() {
                 return;
             }
         }
 
         for candidate in ["nmap-services", "nmap-services.txt", "services.txt"] {
             let path = Path::new(candidate);
-            if path.is_file() {
-                let _ = self.load_file(path);
+            if path.is_file() && self.load_file(path).is_ok() {
                 return;
             }
         }
@@ -472,6 +497,49 @@ http            80/tcp    www www-http
         assert_eq!(db.get(80), Some("http"));
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn repeated_imports_are_replaceable_and_failed_imports_are_atomic() {
+        let dir = std::env::temp_dir().join("ip_port_services_transactional_test");
+        fs::create_dir_all(&dir).unwrap();
+        let first = dir.join("first.services");
+        let second = dir.join("second.services");
+        let invalid = dir.join("invalid.services");
+        fs::write(&first, "first-svc 65001/tcp\ncustom-http 80/tcp\n").unwrap();
+        fs::write(&second, "second-svc 65002/tcp\n").unwrap();
+        fs::write(&invalid, "not-a-tcp-service 65003/udp\n").unwrap();
+
+        let mut db = ServicesDb::default_builtin();
+        assert_eq!(db.load_file(&first).unwrap(), 2);
+        assert_eq!(db.get(65001), Some("first-svc"));
+        assert_eq!(db.get(80), Some("custom-http"));
+        let old_result_service = db.get(65001).unwrap().to_owned();
+
+        for _ in 0..24 {
+            assert_eq!(db.load_file(&second).unwrap(), 1);
+            assert_eq!(db.get(65001), None);
+            assert_eq!(db.get(65002), Some("second-svc"));
+            assert_eq!(db.get(80), Some("http"));
+            assert_eq!(db.load_file(&first).unwrap(), 2);
+        }
+        assert_eq!(old_result_service, "first-svc");
+        let old_description = db.source_info().to_owned();
+        assert!(db.load_file(&invalid).is_err());
+        assert_eq!(db.get(65001), Some("first-svc"));
+        assert_eq!(db.source_info(), old_description);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cloned_service_snapshot_survives_reset() {
+        let mut db = ServicesDb::default_builtin();
+        db.set(22, "my-local-ssh");
+        let captured = db.get(22).unwrap().to_owned();
+        db = ServicesDb::default_builtin();
+        assert_eq!(captured, "my-local-ssh");
+        assert_eq!(db.get(22), Some("ssh"));
     }
 
     #[test]
