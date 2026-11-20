@@ -211,41 +211,109 @@ pub fn parse_neighbor_cache(output: &str) -> HashMap<IpAddr, String> {
     map
 }
 
-fn read_neighbor_cache() -> HashMap<IpAddr, String> {
-    let mut neighbors = HashMap::new();
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(contents) = std::fs::read_to_string("/proc/net/arp") {
-            neighbors.extend(parse_neighbor_cache(&contents));
-        }
-        if let Ok(output) = Command::new("ip").args(["-6", "neigh", "show"]).output() {
-            neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(
-                &output.stdout,
-            )));
-        }
-    }
+fn read_neighbor_cache() -> Result<HashMap<IpAddr, String>, String> {
     #[cfg(target_os = "windows")]
     {
-        if let Ok(output) = Command::new("arp").arg("-a").output() {
-            neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(
-                &output.stdout,
-            )));
-        }
+        return read_windows_neighbor_cache();
     }
-    #[cfg(target_os = "macos")]
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        if let Ok(output) = Command::new("arp").arg("-an").output() {
-            neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(
-                &output.stdout,
-            )));
+        let mut neighbors = HashMap::new();
+        let mut any_source = false;
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(contents) = std::fs::read_to_string("/proc/net/arp") {
+                neighbors.extend(parse_neighbor_cache(&contents));
+                any_source = true;
+            }
+            if let Ok(output) = Command::new("ip").args(["-6", "neigh", "show"]).output()
+                && output.status.success()
+            {
+                neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(&output.stdout)));
+                any_source = true;
+            }
         }
-        if let Ok(output) = Command::new("ndp").arg("-an").output() {
-            neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(
-                &output.stdout,
-            )));
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(output) = Command::new("arp").arg("-an").output()
+                && output.status.success()
+            {
+                neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(&output.stdout)));
+                any_source = true;
+            }
+            if let Ok(output) = Command::new("ndp").arg("-an").output()
+                && output.status.success()
+            {
+                neighbors.extend(parse_neighbor_cache(&String::from_utf8_lossy(&output.stdout)));
+                any_source = true;
+            }
+        }
+        if any_source {
+            Ok(neighbors)
+        } else {
+            Err("No readable ARP/NDP neighbor-cache source on this host".to_owned())
         }
     }
-    neighbors
+}
+
+#[cfg(target_os = "windows")]
+fn read_windows_neighbor_cache() -> Result<HashMap<IpAddr, String>, String> {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        FreeMibTable, GetIpNetTable2, MIB_IPNET_TABLE2,
+    };
+    use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC};
+
+    // GetIpNetTable2 is read-only: unlike ResolveIpNetEntry2, it never
+    // issues ARP requests or IPv6 neighbor solicitations.
+    let mut table: *mut MIB_IPNET_TABLE2 = std::ptr::null_mut();
+    // SAFETY: The API initializes the out-pointer; the OS owns the result.
+    let code = unsafe { GetIpNetTable2(AF_UNSPEC, &mut table) };
+    if code != 0 {
+        return Err(format!("GetIpNetTable2 failed (Windows error {code})"));
+    }
+    if table.is_null() {
+        return Err("GetIpNetTable2 returned a null neighbor table".to_owned());
+    }
+
+    struct TableOwner(*mut MIB_IPNET_TABLE2);
+    impl Drop for TableOwner {
+        fn drop(&mut self) {
+            // SAFETY: This allocation was returned by GetIpNetTable2 and
+            // must be released by FreeMibTable exactly once.
+            unsafe { FreeMibTable(self.0.cast()) };
+        }
+    }
+    let owner = TableOwner(table);
+    // SAFETY: GetIpNetTable2 provides NumEntries valid aligned rows.
+    // Use the Table field's actual alignment: the header can contain padding.
+    let rows = unsafe {
+        std::slice::from_raw_parts((*owner.0).Table.as_ptr(), (*owner.0).NumEntries as usize)
+    };
+    let mut neighbors = HashMap::with_capacity(rows.len());
+    for row in rows {
+        if row.PhysicalAddressLength != 6 {
+            continue;
+        }
+        // SAFETY: The si_family discriminant selects the active sockaddr union field.
+        let ip = unsafe {
+            if row.Address.si_family == AF_INET {
+                IpAddr::V4(Ipv4Addr::from(row.Address.Ipv4.sin_addr.S_un.S_addr.to_ne_bytes()))
+            } else if row.Address.si_family == AF_INET6 {
+                IpAddr::V6(Ipv6Addr::from(row.Address.Ipv6.sin6_addr.u.Byte))
+            } else {
+                continue;
+            }
+        };
+        let mac_bytes = &row.PhysicalAddress[..6];
+        let mac = mac_bytes.iter().map(|b| format!("{b:02X}"))
+            .collect::<Vec<_>>().join(":");
+        if let Some(valid) = normalize_mac(&mac) {
+            neighbors.insert(ip, valid);
+        }
+    }
+    Ok(neighbors)
 }
 
 #[cfg(test)]
@@ -276,6 +344,25 @@ mod tests {
             oui_vendor(&table[&"192.168.1.2".parse::<IpAddr>().unwrap()]),
             Some("Raspberry Pi Foundation")
         );
+    }
+
+    #[test]
+    fn distinguishes_ptr_success_absence_and_resolver_errors() {
+        let ip: IpAddr = "192.0.2.10".parse().unwrap();
+        let (name, state) = classify_ptr(ip, Ok("host.example.test".to_owned()));
+        assert_eq!(name.as_deref(), Some("host.example.test"));
+        assert_eq!(state, PtrStatus::Resolved);
+        let (name, state) = classify_ptr(ip, Ok(ip.to_string()));
+        assert!(name.is_none());
+        assert_eq!(state, PtrStatus::NoName);
+        let (name, state) = classify_ptr(ip, Err(io::Error::from(io::ErrorKind::NotFound)));
+        assert!(name.is_none());
+        assert_eq!(state, PtrStatus::NoName);
+        let (_, state) = classify_ptr(
+            ip,
+            Err(io::Error::new(io::ErrorKind::TimedOut, "synthetic resolver timeout")),
+        );
+        assert!(matches!(state, PtrStatus::Failed(reason) if reason.contains("timeout")));
     }
 
     #[test]
