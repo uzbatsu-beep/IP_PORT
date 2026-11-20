@@ -1,0 +1,29 @@
+name: Prepare PR 6 Rust sources
+on:
+  push:
+    branches: [feat/pr-6-windows-neighbors-ptr-diagnostics]
+    paths: [.github/workflows/pr6-prepare.yml]
+permissions:
+  contents: write
+jobs:
+  format-and-lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Refresh Cargo.lock for explicit Windows API dependency
+        run: cargo metadata --format-version 1 > /dev/null
+      - name: Format Rust code
+        run: cargo fmt --all
+      - name: Remove temporary workflow and push formatted source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/pr6-prepare.yml
+          git add -A
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: lock Windows API bindings and rustfmt PTR diagnostics"
+          git push origin HEAD:refs/heads/feat/pr-6-windows-neighbors-ptr-diagnostics
