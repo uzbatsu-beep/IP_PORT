@@ -187,9 +187,25 @@ fn render_flat_table(app: &mut App, ui: &mut Ui) {
                     let entry_idx = app.visible_indices()[row.index()];
                     let entry = app.row(entry_idx).clone();
                     row.set_selected(app.selected_result == Some(entry_idx));
+                    let info = app.host_info.get(&entry.raw.ip).cloned();
                     let (_, address_response) = row.col(|ui| {
-                        ui.monospace(&entry.ip_text);
+                        ui.horizontal(|ui| {
+                            ui.monospace(&entry.ip_text);
+                            if let Some(hostname) = info.as_ref().and_then(|i| i.hostname.as_deref()) {
+                                ui.label(RichText::new(hostname).small().weak());
+                            }
+                        });
                     });
+                    if let Some(info) = &info {
+                        let tooltip = format!(
+                            "PTR: {}\nCached MAC: {}\nOUI: {}\nVendor: {}",
+                            info.hostname.as_deref().unwrap_or("N/A"),
+                            info.mac.as_deref().unwrap_or("N/A"),
+                            info.oui.as_deref().unwrap_or("N/A"),
+                            info.vendor.as_deref().unwrap_or("Unknown"),
+                        );
+                        address_response.clone().on_hover_text(tooltip);
+                    }
                     if address_response.clicked() {
                         app.selected_result = Some(entry_idx);
                     }
@@ -295,6 +311,15 @@ fn render_grouped_by_host(app: &mut App, ui: &mut Ui) {
         .show(ui, |ui| {
             let host_groups = app.host_groups().to_vec();
             for group in &host_groups {
+                let info = app.host_info.get(&group.ip);
+                let display_host = info
+                    .and_then(|i| i.hostname.as_deref())
+                    .map(|name| format!("{} ({name})", group.ip_text))
+                    .unwrap_or_else(|| group.ip_text.clone());
+                let identity = info
+                    .and_then(|i| i.mac.as_deref())
+                    .map(|mac| format!(" · MAC {mac}"))
+                    .unwrap_or_default();
                 let latency_text = if group.has_measured_rtt {
                     format!("{:.2} ms", group.min_rtt.as_secs_f64() * 1000.0)
                 } else {
@@ -302,12 +327,12 @@ fn render_grouped_by_host(app: &mut App, ui: &mut Ui) {
                 };
                 let header_title = format!(
                     "🖥  {} — {} port{} ({}) · {}",
-                    group.ip_text,
+                    display_host,
                     group.ports_count,
                     if group.ports_count == 1 { "" } else { "s" },
                     group.services_summary,
                     latency_text
-                );
+                ) + &identity;
 
                 egui::CollapsingHeader::new(RichText::new(header_title).strong())
                     .default_open(true)

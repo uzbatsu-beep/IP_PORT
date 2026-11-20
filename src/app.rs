@@ -1,11 +1,13 @@
+use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crate::scanner::targets;
+use crate::host_info::{HostInfo, HostInfoWorker};
 use crate::scanner::{
     self, PortState, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
 };
+use crate::scanner::{scope::Exclusions, targets};
 use crate::ui;
 
 /// Максимальное число событий сканера, обрабатываемых за один кадр UI.
@@ -96,6 +98,7 @@ pub enum StatusLevel {
 pub struct ScopePreview {
     pub targets: usize,
     pub hostnames: usize,
+    pub excluded: usize,
     pub ports: usize,
     pub probes: usize,
 }
@@ -151,22 +154,32 @@ struct InputCache {
     targets: Result<crate::scanner::TargetList, String>,
     ports_raw: String,
     ports: Result<Vec<u16>, String>,
+    exclusions_raw: String,
+    exclusions: Result<Exclusions, String>,
     bind_addr_raw: String,
     bind_addr: Result<Option<IpAddr>, String>,
     preview: Result<ScopePreview, String>,
 }
 
 impl InputCache {
-    fn new(targets_input: &str, ports_input: &str, bind_addr_input: &str) -> Self {
+    fn new(
+        targets_input: &str,
+        ports_input: &str,
+        bind_addr_input: &str,
+        exclusions_input: &str,
+    ) -> Self {
         let targets = targets::parse_targets(targets_input);
         let ports = targets::parse_ports(ports_input);
         let bind_addr = Self::parse_bind_addr(bind_addr_input);
-        let preview = Self::compute_preview(&targets, &ports, &bind_addr);
+        let exclusions = Exclusions::parse(exclusions_input);
+        let preview = Self::compute_preview(&targets, &ports, &bind_addr, &exclusions);
         Self {
             targets_raw: targets_input.to_owned(),
             targets,
             ports_raw: ports_input.to_owned(),
             ports,
+            exclusions_raw: exclusions_input.to_owned(),
+            exclusions,
             bind_addr_raw: bind_addr_input.to_owned(),
             bind_addr,
             preview,
@@ -188,7 +201,13 @@ impl InputCache {
         }
     }
 
-    fn sync(&mut self, targets_input: &str, ports_input: &str, bind_addr_input: &str) {
+    fn sync(
+        &mut self,
+        targets_input: &str,
+        ports_input: &str,
+        bind_addr_input: &str,
+        exclusions_input: &str,
+    ) {
         let mut changed = false;
         if self.targets_raw != targets_input {
             self.targets_raw.clear();
@@ -202,6 +221,12 @@ impl InputCache {
             self.ports = targets::parse_ports(ports_input);
             changed = true;
         }
+        if self.exclusions_raw != exclusions_input {
+            self.exclusions_raw.clear();
+            self.exclusions_raw.push_str(exclusions_input);
+            self.exclusions = Exclusions::parse(exclusions_input);
+            changed = true;
+        }
         if self.bind_addr_raw != bind_addr_input {
             self.bind_addr_raw.clear();
             self.bind_addr_raw.push_str(bind_addr_input);
@@ -209,7 +234,12 @@ impl InputCache {
             changed = true;
         }
         if changed {
-            self.preview = Self::compute_preview(&self.targets, &self.ports, &self.bind_addr);
+            self.preview = Self::compute_preview(
+                &self.targets,
+                &self.ports,
+                &self.bind_addr,
+                &self.exclusions,
+            );
         }
     }
 
@@ -217,14 +247,28 @@ impl InputCache {
         targets: &Result<crate::scanner::TargetList, String>,
         ports: &Result<Vec<u16>, String>,
         bind_addr: &Result<Option<IpAddr>, String>,
+        exclusions: &Result<Exclusions, String>,
     ) -> Result<ScopePreview, String> {
         if let Err(err) = bind_addr {
             return Err(err.clone());
         }
-        let (targets_len, hostnames_len) = match targets {
-            Ok(list) => (list.estimated_count(), list.hostnames.len()),
+        let exclusions = exclusions
+            .as_ref()
+            .map_err(|err| format!("Exclusions: {err}"))?;
+        let (targets_len, hostnames_len, excluded) = match targets {
+            Ok(list) => {
+                let excluded = list.ips.iter().filter(|ip| exclusions.contains(ip)).count();
+                (
+                    list.estimated_count() - excluded,
+                    list.hostnames.len(),
+                    excluded,
+                )
+            }
             Err(err) => return Err(format!("Targets: {err}")),
         };
+        if targets_len == 0 {
+            return Err("All targets are excluded from scan scope".to_owned());
+        }
         let ports_len = match ports {
             Ok(list) => list.len(),
             Err(err) => return Err(format!("Ports: {err}")),
@@ -235,6 +279,7 @@ impl InputCache {
         Ok(ScopePreview {
             targets: targets_len,
             hostnames: hostnames_len,
+            excluded,
             ports: ports_len,
             probes,
         })
@@ -258,6 +303,12 @@ pub struct App {
     pub targets_input: String,
     pub ports_input: String,
     pub bind_addr_input: String,
+    pub exclusions_input: String,
+    pub resolve_ptr: bool,
+    pub read_neighbor_cache: bool,
+    pub host_info: HashMap<IpAddr, HostInfo>,
+    host_info_pending: HashSet<IpAddr>,
+    host_info_worker: Option<HostInfoWorker>,
     pub interfaces: Vec<crate::scanner::NetworkInterfaceInfo>,
     pub timeout_ms: u64,
     pub concurrency: usize,
@@ -313,12 +364,24 @@ impl App {
         let targets_input = "127.0.0.1".to_owned();
         let ports_input = "22,80,443".to_owned();
         let bind_addr_input = String::new();
-        let input_cache = InputCache::new(&targets_input, &ports_input, &bind_addr_input);
+        let exclusions_input = String::new();
+        let input_cache = InputCache::new(
+            &targets_input,
+            &ports_input,
+            &bind_addr_input,
+            &exclusions_input,
+        );
 
         Self {
             targets_input,
             ports_input,
             bind_addr_input,
+            exclusions_input,
+            resolve_ptr: false,
+            read_neighbor_cache: false,
+            host_info: HashMap::new(),
+            host_info_pending: HashSet::new(),
+            host_info_worker: None,
             interfaces: crate::scanner::interfaces::list_interfaces(),
             timeout_ms: 800,
             concurrency: 256,
@@ -383,6 +446,7 @@ impl App {
             &self.targets_input,
             &self.ports_input,
             &self.bind_addr_input,
+            &self.exclusions_input,
         );
         self.input_cache
             .preview
@@ -411,6 +475,7 @@ impl App {
             &self.targets_input,
             &self.ports_input,
             &self.bind_addr_input,
+            &self.exclusions_input,
         );
         let preview = match &self.input_cache.preview {
             Ok(preview) => *preview,
@@ -450,6 +515,12 @@ impl App {
             banner_timeout: Duration::from_millis(self.banner_timeout_ms),
             protocol: self.protocol,
             bind_addr,
+            exclusions: self
+                .input_cache
+                .exclusions
+                .as_ref()
+                .expect("validated exclusions")
+                .clone(),
         };
         let handle = match spawn_fn(config) {
             Ok(handle) => handle,
@@ -460,6 +531,7 @@ impl App {
         };
 
         self.clear_results_storage();
+        self.start_host_enrichment();
         self.selected_result = None;
         self.target_count = preview.targets;
         self.port_count = preview.ports;
@@ -499,6 +571,9 @@ impl App {
             return;
         }
         self.clear_results_storage();
+        if self.is_running() {
+            self.start_host_enrichment();
+        }
         if !self.is_running() {
             self.set_status(StatusLevel::Idle, "Results cleared".to_owned());
         }
@@ -509,10 +584,48 @@ impl App {
             self.dropped_open_results += 1;
             return;
         }
+        if !self.host_info.contains_key(&result.ip)
+            && !self.host_info_pending.contains(&result.ip)
+            && let Some(worker) = &self.host_info_worker
+            && worker.submit(result.ip)
+        {
+            self.host_info_pending.insert(result.ip);
+        }
         self.rows.push(ResultRow::from_result(result.clone()));
         self.results.push(result);
         self.view_dirty = true;
         self.rtt_stats_dirty = true;
+    }
+
+    fn start_host_enrichment(&mut self) {
+        if !self.resolve_ptr && !self.read_neighbor_cache {
+            return;
+        }
+        match HostInfoWorker::start(self.resolve_ptr, self.read_neighbor_cache) {
+            Ok(worker) => self.host_info_worker = Some(worker),
+            Err(err) => self.show_toast(format!("Host enrichment disabled: {err}")),
+        }
+    }
+
+    fn drain_host_enrichment(&mut self, ctx: &egui::Context) {
+        for _ in 0..128 {
+            let next = self
+                .host_info_worker
+                .as_ref()
+                .and_then(HostInfoWorker::try_recv);
+            let Some((ip, info)) = next else { break };
+            self.host_info_pending.remove(&ip);
+            self.host_info.insert(ip, info);
+            // Metadata can affect displayed rows and future filter matches.
+            self.view_dirty = true;
+        }
+        if self.host_info_worker.is_some() {
+            if self.host_info_pending.is_empty() && !self.is_running() {
+                self.host_info_worker = None;
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(125));
+            }
+        }
     }
 
     pub fn ensure_results_view(&mut self) {
@@ -527,7 +640,19 @@ impl App {
         let query_lower = self.results_filter.trim().to_ascii_lowercase();
         self.visible_indices.clear();
         for (idx, row) in self.rows.iter().enumerate() {
-            if row.matches_lowercase_query(&query_lower) {
+            let info_matches =
+                self.host_info.get(&row.raw.ip).is_some_and(|info| {
+                    info.hostname
+                        .as_deref()
+                        .is_some_and(|value| contains_ascii_case_insensitive(value, &query_lower))
+                        || info.mac.as_deref().is_some_and(|value| {
+                            contains_ascii_case_insensitive(value, &query_lower)
+                        })
+                        || info.vendor.as_deref().is_some_and(|value| {
+                            contains_ascii_case_insensitive(value, &query_lower)
+                        })
+                });
+            if row.matches_lowercase_query(&query_lower) || info_matches {
                 self.visible_indices.push(idx);
             }
         }
@@ -675,6 +800,7 @@ impl App {
         self.last_export_dir = path.parent().map(PathBuf::from);
 
         let snapshot = self.results.clone();
+        let host_metadata = self.host_info.clone();
         let snapshot_count = snapshot.len();
         let (sender, receiver) = std::sync::mpsc::channel();
         let path_for_task = path.clone();
@@ -684,8 +810,15 @@ impl App {
             .spawn(move || {
                 let result = match extension.as_str() {
                     "csv" => crate::export::save_csv(&path_for_task, &snapshot),
-                    "json" => crate::export::save_json(&path_for_task, &snapshot),
-                    "html" => crate::export::save_html(&path_for_task, &snapshot),
+                    "json" => {
+                        crate::export::save_json_enriched(&path_for_task, &snapshot, &host_metadata)
+                    }
+                    "html" if host_metadata.is_empty() => {
+                        crate::export::save_html(&path_for_task, &snapshot)
+                    }
+                    "html" => {
+                        crate::export::save_html_enriched(&path_for_task, &snapshot, &host_metadata)
+                    }
                     _ => crate::export::save_json(&path_for_task, &snapshot),
                 }
                 .map_err(|err| err.to_string());
@@ -765,7 +898,7 @@ impl App {
         } else {
             Some(self.bind_addr_input.trim().to_owned())
         };
-        let profile = crate::profile::ScanProfile::new(
+        let mut profile = crate::profile::ScanProfile::new(
             self.targets_input.clone(),
             self.ports_input.clone(),
             self.timeout_ms,
@@ -775,6 +908,9 @@ impl App {
             self.protocol,
             bind_addr,
         );
+        profile.exclusions = self.exclusions_input.clone();
+        profile.resolve_ptr = self.resolve_ptr;
+        profile.read_neighbor_cache = self.read_neighbor_cache;
         match crate::profile::save(path, &profile) {
             Ok(()) => {
                 let file_name = path
@@ -803,6 +939,9 @@ impl App {
                 self.banner_grabbing = profile.banner_grabbing;
                 self.banner_timeout_ms = profile.banner_timeout_ms;
                 self.protocol = profile.protocol;
+                self.exclusions_input = profile.exclusions;
+                self.resolve_ptr = profile.resolve_ptr;
+                self.read_neighbor_cache = profile.read_neighbor_cache;
                 if let Some(bind) = profile.bind_addr {
                     self.bind_addr_input = bind;
                 } else {
@@ -812,6 +951,7 @@ impl App {
                     &self.targets_input,
                     &self.ports_input,
                     &self.bind_addr_input,
+                    &self.exclusions_input,
                 );
                 let file_name = path
                     .file_name()
@@ -834,6 +974,9 @@ impl App {
         self.rows.clear();
         self.visible_indices.clear();
         self.host_groups.clear();
+        self.host_info.clear();
+        self.host_info_pending.clear();
+        self.host_info_worker = None;
         self.cached_rtt_stats = None;
         self.rtt_stats_dirty = true;
         self.selected_result = None;
@@ -1060,6 +1203,7 @@ impl App {
     pub fn update_ui(&mut self, ui: &mut egui::Ui) {
         self.poll_export_task(ui.ctx());
         let processed = self.drain_events_with_budget(MAX_EVENTS_PER_FRAME);
+        self.drain_host_enrichment(ui.ctx());
 
         let is_cmd = |m: &egui::Modifiers| m.command || m.ctrl || m.mac_cmd;
         let command = ui.input(|i| is_cmd(&i.modifiers));
@@ -1587,6 +1731,7 @@ mod tests {
             ScopePreview {
                 targets: 1,
                 hostnames: 0,
+                excluded: 0,
                 ports: 3,
                 probes: 3
             }
@@ -1599,6 +1744,7 @@ mod tests {
             ScopePreview {
                 targets: 2,
                 hostnames: 1,
+                excluded: 0,
                 ports: 3,
                 probes: 6
             }
@@ -1611,6 +1757,33 @@ mod tests {
         app.start_scan();
         assert_eq!(app.status_level, StatusLevel::Error);
         assert!(!app.is_running());
+    }
+
+    #[test]
+    fn exclusions_update_preview_and_reject_empty_scope() {
+        let mut app = App::default_state();
+        app.targets_input = "10.0.0.1-10.0.0.3".to_owned();
+        app.ports_input = "80,443".to_owned();
+        app.exclusions_input = "10.0.0.2".to_owned();
+        let scope = app.refresh_input_preview().unwrap();
+        assert_eq!(scope.excluded, 1);
+        assert_eq!(scope.targets, 2);
+        assert_eq!(scope.probes, 4);
+
+        app.exclusions_input = "10.0.0.0/24".to_owned();
+        assert!(!app.can_start_scan());
+        assert!(
+            app.refresh_input_preview()
+                .unwrap_err()
+                .contains("excluded")
+        );
+
+        app.exclusions_input = "not-an-ip".to_owned();
+        assert!(
+            app.refresh_input_preview()
+                .unwrap_err()
+                .contains("Exclusions:")
+        );
     }
 
     #[test]

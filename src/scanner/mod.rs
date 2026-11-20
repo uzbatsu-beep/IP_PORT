@@ -1,6 +1,7 @@
 pub mod interfaces;
 pub mod presets;
 pub mod probe;
+pub mod scope;
 pub mod services;
 pub mod targets;
 pub mod udp;
@@ -30,6 +31,7 @@ pub struct ScanConfig {
     pub banner_timeout: Duration,
     pub protocol: ScanProtocol,
     pub bind_addr: Option<IpAddr>,
+    pub exclusions: scope::Exclusions,
 }
 
 /// Найденный открытый порт.
@@ -236,7 +238,17 @@ impl ScanConfig {
         if self.targets.is_empty() || self.ports.is_empty() {
             return Err("At least one target and port are required".to_owned());
         }
-        checked_total(self.targets.estimated_count(), self.ports.len())
+        let remaining_explicit = self
+            .targets
+            .ips
+            .iter()
+            .filter(|ip| !self.exclusions.contains(ip))
+            .count();
+        let targets = remaining_explicit.saturating_add(self.targets.hostnames.len());
+        if targets == 0 {
+            return Err("Every target is excluded from the scan scope".to_owned());
+        }
+        checked_total(targets, self.ports.len())
     }
 }
 
@@ -402,7 +414,7 @@ where
     P: Fn(IpAddr, u16, Duration) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = probe::ProbeOutcome> + Send + 'static,
 {
-    let resolved_targets = match targets::resolve_targets_with_cancel(
+    let mut resolved_targets = match targets::resolve_targets_with_cancel(
         &config.targets,
         targets::DEFAULT_DNS_TIMEOUT,
         &cancel,
@@ -419,6 +431,11 @@ where
         }
     };
 
+    // Apply scope blacklist after DNS A/AAAA resolution as well as direct IP input.
+    resolved_targets.retain(|ip| !config.exclusions.contains(ip));
+    if resolved_targets.is_empty() {
+        return Err("All resolved targets match exclusion rules".to_owned());
+    }
     let total = checked_total(resolved_targets.len(), config.ports.len())?;
 
     if tx.send(ScanEvent::Started { total }).await.is_err() {
@@ -629,6 +646,7 @@ mod tests {
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
             bind_addr: None,
+            exclusions: scope::Exclusions::default(),
         };
         let events = collect(
             &mut spawn_with(
@@ -721,6 +739,7 @@ mod tests {
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
             bind_addr: None,
+            exclusions: scope::Exclusions::default(),
         };
         for _ in 0..2 {
             let events = collect(&mut spawn(config.clone()).unwrap());
@@ -773,6 +792,7 @@ mod tests {
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
             bind_addr: None,
+            exclusions: scope::Exclusions::default(),
         };
         let (tx, mut rx) = mpsc::channel(1);
         let cancel = CancellationToken::new();
@@ -809,6 +829,7 @@ mod tests {
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
             bind_addr: None,
+            exclusions: scope::Exclusions::default(),
         };
         assert!(spawn(config).is_err());
     }
@@ -825,6 +846,7 @@ mod tests {
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
             bind_addr: None,
+            exclusions: scope::Exclusions::default(),
         };
         let mut handle = spawn(config.clone()).unwrap();
         handle.cancel();
@@ -870,6 +892,7 @@ mod tests {
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
             bind_addr: None,
+            exclusions: scope::Exclusions::default(),
         };
         let result = spawn_with_spawner(
             config,
@@ -903,6 +926,7 @@ mod tests {
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
             bind_addr: None,
+            exclusions: scope::Exclusions::default(),
         };
         let mut handle = spawn_with(
             config,
@@ -928,6 +952,7 @@ mod tests {
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
             bind_addr: None,
+            exclusions: scope::Exclusions::default(),
         };
         let mut handle = spawn_with(
             config,
@@ -964,6 +989,7 @@ mod tests {
             banner_timeout: Duration::from_secs(1),
             protocol: ScanProtocol::Tcp,
             bind_addr: None,
+            exclusions: scope::Exclusions::default(),
         };
         let mut handle = spawn_with(
             config,
@@ -1031,6 +1057,7 @@ mod tests {
             banner_timeout: Duration::from_millis(500),
             protocol: ScanProtocol::Tcp,
             bind_addr: None,
+            exclusions: scope::Exclusions::default(),
         };
         let mut handle = spawn(config).unwrap();
         let events = collect(&mut handle);
@@ -1078,6 +1105,7 @@ mod tests {
             banner_timeout: Duration::from_millis(200),
             protocol: ScanProtocol::Udp,
             bind_addr: None,
+            exclusions: scope::Exclusions::default(),
         };
 
         let (tx, mut rx) = mpsc::channel(16);
@@ -1117,6 +1145,7 @@ mod tests {
             banner_timeout: Duration::from_millis(500),
             protocol: ScanProtocol::Tcp,
             bind_addr: None,
+            exclusions: scope::Exclusions::default(),
         };
 
         let (tx, mut rx) = mpsc::channel(16);
@@ -1146,6 +1175,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn excluded_ip_is_never_scheduled_when_other_hosts_are_allowed() {
+        let banned = IpAddr::from([10, 0, 0, 1]);
+        let allowed = IpAddr::from([10, 0, 0, 2]);
+        let config = ScanConfig {
+            targets: TargetList::from_ips(vec![banned, allowed]),
+            ports: vec![80, 443],
+            timeout: Duration::from_millis(100),
+            concurrency: 2,
+            banner_grabbing: false,
+            banner_timeout: Duration::from_millis(100),
+            protocol: ScanProtocol::Tcp,
+            bind_addr: None,
+            exclusions: scope::Exclusions::parse("10.0.0.1").unwrap(),
+        };
+        assert_eq!(config.total_probes().unwrap(), 2);
+        let seen = Arc::new(Mutex::new(Vec::<IpAddr>::new()));
+        let recorded = Arc::clone(&seen);
+        let (tx, mut rx) = mpsc::channel(16);
+        let terminal = run_with_probe(
+            config,
+            2,
+            tx,
+            CancellationToken::new(),
+            move |ip, _port, _timeout| {
+                let recorded = Arc::clone(&recorded);
+                async move {
+                    recorded.lock().unwrap().push(ip);
+                    probe::ProbeOutcome::Refused
+                }
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(terminal, ScanEvent::Finished { done: 2, .. }));
+        let observed = seen.lock().unwrap();
+        assert_eq!(observed.len(), 2);
+        assert!(observed.iter().all(|ip| *ip == allowed));
+        assert!(!observed.contains(&banned));
+        let start = rx.try_recv().unwrap();
+        assert!(matches!(start, ScanEvent::Started { total: 2 }));
+    }
+
+    #[tokio::test]
+    async fn exclusions_apply_after_forward_dns_without_probes() {
+        let config = ScanConfig {
+            targets: TargetList::new(Vec::new(), vec!["localhost".to_owned()]),
+            ports: vec![22, 80],
+            timeout: Duration::from_millis(500),
+            concurrency: 2,
+            banner_grabbing: false,
+            banner_timeout: Duration::from_millis(500),
+            protocol: ScanProtocol::Tcp,
+            bind_addr: None,
+            exclusions: scope::Exclusions::parse("127.0.0.0/8\n::1").unwrap(),
+        };
+        let (tx, mut rx) = mpsc::channel(16);
+        let err = run(config, 2, tx, CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert!(err.contains("All resolved targets"), "{err}");
+        assert!(
+            rx.try_recv().is_err(),
+            "Excluded targets must not emit probe events"
+        );
+    }
+
+    #[tokio::test]
     async fn scan_reports_error_when_hostname_fails_to_resolve() {
         let config = ScanConfig {
             targets: TargetList::new(
@@ -1159,6 +1255,7 @@ mod tests {
             banner_timeout: Duration::from_millis(500),
             protocol: ScanProtocol::Tcp,
             bind_addr: None,
+            exclusions: scope::Exclusions::default(),
         };
 
         let (tx, _rx) = mpsc::channel(16);

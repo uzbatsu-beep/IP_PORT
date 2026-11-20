@@ -27,6 +27,12 @@ pub struct ScanProfile {
     pub protocol: crate::scanner::ScanProtocol,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bind_addr: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub exclusions: String,
+    #[serde(default)]
+    pub resolve_ptr: bool,
+    #[serde(default)]
+    pub read_neighbor_cache: bool,
 }
 
 impl ScanProfile {
@@ -51,6 +57,9 @@ impl ScanProfile {
             banner_timeout_ms,
             protocol,
             bind_addr,
+            exclusions: String::new(),
+            resolve_ptr: false,
+            read_neighbor_cache: false,
         }
     }
 
@@ -64,6 +73,13 @@ impl ScanProfile {
         targets::parse_targets(&self.targets)
             .map_err(|error| format!("Invalid targets: {error}"))?;
         targets::parse_ports(&self.ports).map_err(|error| format!("Invalid ports: {error}"))?;
+        let excluded = crate::scanner::scope::Exclusions::parse(&self.exclusions)
+            .map_err(|error| format!("Invalid exclusions: {error}"))?;
+        let targets = targets::parse_targets(&self.targets)
+            .map_err(|error| format!("Invalid targets: {error}"))?;
+        if targets.hostnames.is_empty() && targets.ips.iter().all(|ip| excluded.contains(ip)) {
+            return Err("All targets are excluded from scan scope".to_owned());
+        }
         if !(50..=5000).contains(&self.timeout_ms) {
             return Err("Timeout must be between 50 and 5000 ms".to_owned());
         }
@@ -106,7 +122,7 @@ mod tests {
     use super::*;
 
     fn sample() -> ScanProfile {
-        ScanProfile::new(
+        let mut profile = ScanProfile::new(
             "127.0.0.1\n192.168.1.0/30".to_owned(),
             "22,80,443".to_owned(),
             800,
@@ -115,7 +131,11 @@ mod tests {
             1200,
             crate::scanner::ScanProtocol::Udp,
             Some("192.168.1.50".to_owned()),
-        )
+        );
+        profile.exclusions = "10.10.0.0/16".to_owned();
+        profile.resolve_ptr = true;
+        profile.read_neighbor_cache = true;
+        profile
     }
 
     #[test]
@@ -137,6 +157,9 @@ mod tests {
         .unwrap();
         let loaded = load(&path).unwrap();
         assert!(!loaded.banner_grabbing);
+        assert!(loaded.exclusions.is_empty());
+        assert!(!loaded.resolve_ptr);
+        assert!(!loaded.read_neighbor_cache);
         assert_eq!(loaded.banner_timeout_ms, 1000);
         assert_eq!(loaded.protocol, crate::scanner::ScanProtocol::Tcp);
         let _ = std::fs::remove_file(path);
@@ -233,6 +256,20 @@ mod tests {
         for profile in invalid {
             assert!(profile.validate().is_err());
         }
+    }
+
+    #[test]
+    fn rejects_malformed_exclusions_in_profile() {
+        let mut profile = sample();
+        profile.exclusions = "not-an-ip".to_owned();
+        assert!(
+            profile
+                .validate()
+                .unwrap_err()
+                .contains("Invalid exclusions")
+        );
+        profile.exclusions = "127.0.0.0/8\n192.168.1.0/24".to_owned();
+        assert!(profile.validate().unwrap_err().contains("All targets"));
     }
 
     #[test]

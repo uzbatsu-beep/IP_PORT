@@ -50,6 +50,26 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         );
 
         ui.add_space(8.0);
+        egui::CollapsingHeader::new(RichText::new("Exclude targets (safety scope)").strong())
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut app.exclusions_input)
+                        .desired_rows(3)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("192.168.1.1, 192.168.1.200-254\n10.0.0.0/24\n2001:db8::/64"),
+                )
+                .on_hover_text(
+                    "Excluded IPs, ranges and CIDRs are never probed. Also applies after hostname DNS resolution. Comments start with #.",
+                );
+                ui.label(
+                    RichText::new("Invalid exclusions block scanning. DNS target exclusions apply after A/AAAA lookup.")
+                        .small()
+                        .weak(),
+                );
+            });
+
+        ui.add_space(8.0);
         ui.label(RichText::new("Ports").strong());
         ui.add(
             egui::TextEdit::singleline(&mut app.ports_input)
@@ -171,6 +191,18 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     .small(),
             );
         }
+
+        ui.add_space(8.0);
+        egui::CollapsingHeader::new(RichText::new("Host identification").strong())
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.checkbox(&mut app.resolve_ptr, "Resolve reverse DNS (PTR)")
+                    .on_hover_text("Background OS resolver lookup for each discovered unique IP. May contact configured DNS servers.");
+                ui.checkbox(&mut app.read_neighbor_cache, "Read local ARP / NDP cache (MAC + OUI)")
+                    .on_hover_text("Read-only local operating system neighbor cache; no active discovery packets and no admin access required.");
+                ui.label(RichText::new("MAC is available only for neighboring devices present in the OS cache; vendor identification uses a small offline OUI list.")
+                    .small().weak());
+            });
 
         ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
@@ -374,14 +406,24 @@ fn scope_feedback(preview: &Result<ScopePreview, String>, running: bool, ui: &mu
             };
             ui.label(
                 RichText::new(format!(
-                    "Planned scope: {targets_str} × {} port{} (~{} probes)",
+                    "Planned scope: {targets_str} × {} port{} (~{} probes) · {} excluded",
                     scope.ports,
                     if scope.ports == 1 { "" } else { "s" },
-                    scope.probes
+                    scope.probes,
+                    scope.excluded,
                 ))
                 .weak()
                 .small(),
             );
+            if scope.hostnames > 0 {
+                ui.label(
+                    RichText::new(
+                        "DNS addresses are excluded after resolution; final scope may be smaller.",
+                    )
+                    .small()
+                    .weak(),
+                );
+            }
         }
         Ok(_) => {}
         Err(err) => {
