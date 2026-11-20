@@ -149,7 +149,11 @@ pub fn import_and_cache(source: &Path, dir: &Path) -> Result<ImportedOui, String
     let (kind, count) = registry.load_csv(&bytes)?;
     // Commit only validated input; never overwrite the active cache on errors.
     persist_cache(dir, kind, &bytes)?;
-    Ok(ImportedOui { kind, count, registry })
+    Ok(ImportedOui {
+        kind,
+        count,
+        registry,
+    })
 }
 
 pub fn restore(dir: &Path) -> RestoredOui {
@@ -185,7 +189,11 @@ pub fn restore(dir: &Path) -> RestoredOui {
             Err(error) => warnings.push(error),
         }
     }
-    RestoredOui { registry, loaded, warnings }
+    RestoredOui {
+        registry,
+        loaded,
+        warnings,
+    }
 }
 
 pub fn clear_cache(dir: &Path) -> Result<(), String> {
@@ -204,9 +212,14 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn isolated_dir() -> PathBuf {
-        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let dir = std::env::temp_dir().join(format!(
-            "ip_port_oui_cache_test_{}_{}", std::process::id(), stamp
+            "ip_port_oui_cache_test_{}_{}",
+            std::process::id(),
+            stamp
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -216,19 +229,33 @@ mod tests {
     fn imports_and_restores_multiple_ieee_registry_classes() {
         let dir = isolated_dir();
         let source = dir.join("incoming.csv");
-        fs::write(&source, b"Registry,Assignment,Organization Name\nMA-L,001B21,Large Vendor\n").unwrap();
+        fs::write(
+            &source,
+            b"Registry,Assignment,Organization Name\nMA-L,001B21,Large Vendor\n",
+        )
+        .unwrap();
         let imported = import_and_cache(&source, &dir).unwrap();
         assert_eq!(imported.kind, RegistryKind::MaL);
         assert_eq!(imported.count, 1);
-        fs::write(&source, b"Registry,Assignment,Organization Name\nMA-S,001B21A12,Small Vendor\n").unwrap();
+        fs::write(
+            &source,
+            b"Registry,Assignment,Organization Name\nMA-S,001B21A12,Small Vendor\n",
+        )
+        .unwrap();
         import_and_cache(&source, &dir).unwrap();
         fs::remove_file(&source).unwrap();
 
         let restored = restore(&dir);
         assert!(restored.warnings.is_empty(), "{:?}", restored.warnings);
         assert_eq!(restored.loaded, 2);
-        assert_eq!(restored.registry.lookup("00:1B:21:A1:20:01").as_deref(), Some("Small Vendor"));
-        assert_eq!(restored.registry.lookup("00:1B:21:FF:00:01").as_deref(), Some("Large Vendor"));
+        assert_eq!(
+            restored.registry.lookup("00:1B:21:A1:20:01").as_deref(),
+            Some("Small Vendor")
+        );
+        assert_eq!(
+            restored.registry.lookup("00:1B:21:FF:00:01").as_deref(),
+            Some("Large Vendor")
+        );
         clear_cache(&dir).unwrap();
         assert_eq!(restore(&dir).loaded, 0);
         fs::remove_dir_all(dir).unwrap();
@@ -238,13 +265,24 @@ mod tests {
     fn malformed_reimport_leaves_existing_disk_cache_unchanged() {
         let dir = isolated_dir();
         let source = dir.join("incoming.csv");
-        fs::write(&source, b"Registry,Assignment,Organization Name\nMA-L,001B21,Working Vendor\n").unwrap();
+        fs::write(
+            &source,
+            b"Registry,Assignment,Organization Name\nMA-L,001B21,Working Vendor\n",
+        )
+        .unwrap();
         import_and_cache(&source, &dir).unwrap();
-        fs::write(&source, b"Registry,Assignment,Organization Name\nMA-L,BAD,Broken\n").unwrap();
+        fs::write(
+            &source,
+            b"Registry,Assignment,Organization Name\nMA-L,BAD,Broken\n",
+        )
+        .unwrap();
         assert!(import_and_cache(&source, &dir).is_err());
         let restored = restore(&dir);
         assert_eq!(restored.loaded, 1);
-        assert_eq!(restored.registry.lookup("00:1B:21:11:22:33").as_deref(), Some("Working Vendor"));
+        assert_eq!(
+            restored.registry.lookup("00:1B:21:11:22:33").as_deref(),
+            Some("Working Vendor")
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -252,11 +290,18 @@ mod tests {
     fn recovers_committed_cache_from_backup_after_interrupted_replace() {
         let dir = isolated_dir();
         let (target, _pending, backup) = paths(&dir, RegistryKind::MaL);
-        fs::write(&backup, b"Registry,Assignment,Organization Name\nMA-L,001B21,Recovered\n").unwrap();
+        fs::write(
+            &backup,
+            b"Registry,Assignment,Organization Name\nMA-L,001B21,Recovered\n",
+        )
+        .unwrap();
         let restored = restore(&dir);
         assert_eq!(restored.loaded, 1);
         assert!(target.exists());
-        assert_eq!(restored.registry.lookup("00:1B:21:00:00:01").as_deref(), Some("Recovered"));
+        assert_eq!(
+            restored.registry.lookup("00:1B:21:00:00:01").as_deref(),
+            Some("Recovered")
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -752,8 +752,8 @@ impl App {
             self.show_toast("Wait for IEEE OUI import to finish before resetting".to_owned());
             return;
         }
-        let remove_result = crate::oui_store::default_dir()
-            .map(|dir| crate::oui_store::clear_cache(&dir));
+        let remove_result =
+            crate::oui_store::default_dir().map(|dir| crate::oui_store::clear_cache(&dir));
         self.oui_registry.reset();
         self.refresh_oui_vendors();
         match remove_result {
@@ -773,7 +773,8 @@ impl App {
         match outcome {
             Some(Ok(Ok(OuiTaskResult::Imported { filename, data }))) => {
                 self.oui_task = None;
-                self.oui_registry.replace_kind_from(data.kind, data.registry);
+                self.oui_registry
+                    .replace_kind_from(data.kind, data.registry);
                 self.refresh_oui_vendors();
                 self.oui_status = format!(
                     "Imported and saved {} {} entries from {filename}",
@@ -792,10 +793,7 @@ impl App {
                         "Restored {count} IEEE entries; {} cache warning(s)",
                         restored.warnings.len(),
                     );
-                    self.show_toast(format!(
-                        "IEEE OUI cache: {}",
-                        restored.warnings.join("; ")
-                    ));
+                    self.show_toast(format!("IEEE OUI cache: {}", restored.warnings.join("; ")));
                 } else if count > 0 {
                     self.oui_status = format!("Restored {count} saved IEEE OUI entries");
                 } else {
