@@ -41,7 +41,7 @@ pub struct ScanResult {
     pub port: u16,
     pub protocol: ScanProtocol,
     pub state: PortState,
-    pub service: &'static str,
+    pub service: String,
     pub rtt: Duration,
     pub banner: Option<String>,
     pub service_verified: bool,
@@ -49,13 +49,13 @@ pub struct ScanResult {
 
 #[allow(dead_code)]
 impl ScanResult {
-    pub fn new(ip: IpAddr, port: u16, service: &'static str, rtt: Duration) -> Self {
+    pub fn new(ip: IpAddr, port: u16, service: impl Into<String>, rtt: Duration) -> Self {
         Self {
             ip,
             port,
             protocol: ScanProtocol::Tcp,
             state: PortState::Open,
-            service,
+            service: service.into(),
             rtt,
             banner: None,
             service_verified: false,
@@ -65,7 +65,7 @@ impl ScanResult {
     pub fn with_banner(
         ip: IpAddr,
         port: u16,
-        service: &'static str,
+        service: impl Into<String>,
         rtt: Duration,
         banner: Option<String>,
         service_verified: bool,
@@ -75,7 +75,7 @@ impl ScanResult {
             port,
             protocol: ScanProtocol::Tcp,
             state: PortState::Open,
-            service,
+            service: service.into(),
             rtt,
             banner,
             service_verified,
@@ -86,7 +86,7 @@ impl ScanResult {
         ip: IpAddr,
         port: u16,
         state: PortState,
-        service: &'static str,
+        service: impl Into<String>,
         rtt: Duration,
         verified: bool,
     ) -> Self {
@@ -95,7 +95,7 @@ impl ScanResult {
             port,
             protocol: ScanProtocol::Udp,
             state,
-            service,
+            service: service.into(),
             rtt,
             banner: None,
             service_verified: verified,
@@ -499,7 +499,9 @@ where
                     confirmed_service,
                 } = &outcome
                 {
-                    let service = confirmed_service.unwrap_or_else(|| probe::service_name(port));
+                    let service = confirmed_service
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| probe::service_name(port));
                     let result = ScanResult {
                         ip,
                         port,
@@ -518,7 +520,9 @@ where
                     confirmed_service,
                 } = &outcome
                 {
-                    let service = confirmed_service.unwrap_or_else(|| probe::service_name(port));
+                    let service = confirmed_service
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| probe::service_name(port));
                     let result = ScanResult {
                         ip,
                         port,

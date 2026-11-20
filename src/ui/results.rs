@@ -237,10 +237,10 @@ fn render_flat_table(app: &mut App, ui: &mut Ui) {
                                 ui.label(
                                     RichText::new("✔").color(crate::ui::theme::SUCCESS).small(),
                                 );
-                                ui.label(RichText::new(entry.raw.service).strong());
+                                ui.label(RichText::new(entry.raw.service.as_str()).strong());
                             });
                         } else {
-                            ui.label(entry.raw.service);
+                            ui.label(entry.raw.service.as_str());
                         }
                     });
                     if entry.raw.state == crate::scanner::PortState::OpenFiltered {

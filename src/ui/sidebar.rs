@@ -270,6 +270,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         .clicked()
                     {
                         crate::scanner::services::reset_services_to_default();
+                        app.set_status(
+                            StatusLevel::Success,
+                            "Services database reset to built-in defaults".to_owned(),
+                        );
                     }
                 });
             });

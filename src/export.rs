@@ -87,7 +87,7 @@ pub fn save_csv(path: &Path, results: &[ScanResult]) -> io::Result<()> {
     for result in results {
         write_csv_field(&mut out, &result.ip.to_string())?;
         write!(out, ",{},", result.port)?;
-        write_csv_field(&mut out, result.service)?;
+        write_csv_field(&mut out, &result.service)?;
         if result.state == crate::scanner::PortState::OpenFiltered {
             writeln!(out, ",")?;
         } else {
@@ -139,7 +139,7 @@ pub fn save_json_enriched(
         write!(out, ", \"state\": ")?;
         write_json_string(&mut out, result.state.as_str())?;
         write!(out, ", \"service\": ")?;
-        write_json_string(&mut out, result.service)?;
+        write_json_string(&mut out, &result.service)?;
         write!(out, ", \"verified\": {}", result.service_verified)?;
         if let Some(banner) = &result.banner {
             write!(out, ", \"banner\": ")?;
@@ -490,7 +490,7 @@ pub fn save_html_enriched(
             crate::scanner::PortState::Open => "badge-open",
             crate::scanner::PortState::OpenFiltered => "badge-filtered",
         };
-        let svc_esc = escape_html(res.service);
+        let svc_esc = escape_html(&res.service);
         let verified_mark = if res.service_verified {
             "<span class=\"badge-verified\" title=\"Service confirmed by banner\">✔</span>"
         } else {

@@ -552,7 +552,7 @@ pub async fn probe_udp(
 }
 
 /// Определение сервиса по номеру порта через базу соответствий Nmap/IANA.
-pub fn service_name(port: u16) -> &'static str {
+pub fn service_name(port: u16) -> String {
     super::services::service_name(port)
 }
 
