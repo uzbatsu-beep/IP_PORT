@@ -2,6 +2,12 @@
 
 > **v0.4.0 (PR #2, development branch):** scan exclusions (IPv4/IPv6, CIDR, ranges), optional background PTR lookups, and read-only ARP/NDP neighbor-cache MAC/OUI identification. These features are not part of the published v0.3.1 release.
 
+### PR #9 — Persistent IEEE OUI cache and responsive imports
+
+Importing an official IEEE CSV no longer parses up to 16 MiB of data in the GUI rendering thread: the import runs in a worker and displays progress under **Host identification**. Buttons remain disabled until the operation finishes. A successful import saves a validated local copy of the corresponding MA-L, MA-M or MA-S registry in the application data directory (Windows: `%LOCALAPPDATA%\\IP_PORT\\oui`; Linux: `$XDG_DATA_HOME/ip_port/oui` or `~/.local/share/ip_port/oui`; macOS: `~/Library/Application Support/IP_PORT/oui`). Saved registries load automatically in the background when the application starts.
+
+An invalid file or unsuccessful write leaves the active registry intact. Reset OUI clears both the in-memory registry and locally cached imports. No external network requests are made to IEEE. Imported files contain only public OUI assignment data, not scan results.
+
 ### PR #7 — Offline IEEE MAC registries and interface-aware neighbor cache
 
 From **Host identification**, use **Import IEEE CSV...** to load official IEEE Registration Authority files: MA-L `oui.csv` (24-bit assignments), MA-M `mam.csv` / `oui28.csv` (28-bit), and MA-S `oui36.csv` (36-bit). Use **Reset OUI** to return to the bundled vendor names. Each import replaces only that registry class; imports with malformed records fail without modifying the previous registry. A 16 MiB size limit applies per file. Import is local/offline; files are not bundled or downloaded automatically, and imported registries last until the application closes or Reset is used.
