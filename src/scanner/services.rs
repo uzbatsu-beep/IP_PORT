@@ -378,6 +378,11 @@ mod tests {
                 db.set(443, "https");
                 assert_eq!(db.get(443), Some("https"));
 
+                // Model first opening the collapsed UI panel, when LazyLock
+                // initializes the database on the current (small-stack) thread.
+                let lazy = LazyLock::new(|| RwLock::new(ServicesDb::default_builtin()));
+                let info = lazy.read().unwrap().source_info().to_owned();
+                assert!(info.contains("Built-in"));
                 let builtin = ServicesDb::default_builtin();
                 assert_eq!(builtin.get(22), Some("ssh"));
                 assert!(builtin.source_info().contains("Built-in"));
