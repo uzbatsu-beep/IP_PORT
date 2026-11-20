@@ -533,6 +533,24 @@ http            80/tcp    www www-http
     }
 
     #[test]
+    fn published_results_keep_their_services_after_db_replacement() {
+        let ip = std::net::IpAddr::from([127, 0, 0, 1]);
+        let mut db = ServicesDb::default_builtin();
+        db.set(80, "custom-http");
+        let previous_scan = crate::scanner::ScanResult::new(
+            ip,
+            80,
+            db.get(80).unwrap(),
+            std::time::Duration::from_millis(1),
+        );
+        db.set(80, "other-http");
+        assert_eq!(previous_scan.service, "custom-http");
+        assert_eq!(db.get(80), Some("other-http"));
+        drop(db);
+        assert_eq!(previous_scan.service, "custom-http");
+    }
+
+    #[test]
     fn cloned_service_snapshot_survives_reset() {
         let mut db = ServicesDb::default_builtin();
         db.set(22, "my-local-ssh");
