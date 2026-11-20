@@ -23,7 +23,7 @@ impl RegistryKind {
             Self::MaS => 36,
         }
     }
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Self::MaL => "MA-L",
             Self::MaM => "MA-M",
