@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::host_info::{HostInfo, HostInfoEvent, HostInfoWorker, PtrStatus};
 use crate::oui_registry::OuiRegistry;
+use crate::oui_store::{ImportedOui, RestoredOui};
 use crate::scanner::{
     self, PortState, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
 };
@@ -298,6 +299,15 @@ struct ExportTask {
     receiver: std::sync::mpsc::Receiver<(PathBuf, usize, Result<(), String>)>,
 }
 
+enum OuiTaskResult {
+    Imported { filename: String, data: ImportedOui },
+    Restored(RestoredOui),
+}
+
+struct OuiTask {
+    receiver: std::sync::mpsc::Receiver<Result<OuiTaskResult, String>>,
+}
+
 pub type ScanSpawner = fn(ScanConfig) -> Result<ScanHandle, String>;
 
 #[derive(Clone, Debug, Default)]
@@ -323,6 +333,7 @@ pub struct App {
     pub ptr_soft_deadline_ms: u64,
     pub oui_registry: OuiRegistry,
     pub oui_status: String,
+    oui_task: Option<OuiTask>,
     pub host_info: HashMap<IpAddr, HostInfo>,
     host_info_pending: HashSet<IpAddr>,
     host_info_backlog: VecDeque<IpAddr>,
@@ -378,7 +389,9 @@ pub struct App {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         ui::theme::apply(&cc.egui_ctx);
-        Self::default_state()
+        let mut app = Self::default_state();
+        app.start_oui_restore();
+        app
     }
 
     pub fn default_state() -> Self {
@@ -403,6 +416,7 @@ impl App {
             ptr_soft_deadline_ms: 3_000,
             oui_registry: OuiRegistry::default(),
             oui_status: "Built-in OUI list".to_owned(),
+            oui_task: None,
             host_info: HashMap::new(),
             host_info_pending: HashSet::new(),
             host_info_backlog: VecDeque::new(),
@@ -676,25 +690,133 @@ impl App {
         self.host_info_overdue.len()
     }
 
-    pub fn load_oui_file(&mut self, path: &std::path::Path) {
-        match self.oui_registry.load_file(path) {
-            Ok((kind, count)) => {
-                self.oui_status = format!(
-                    "Loaded {count} {} assignments from {}",
-                    kind.label(),
-                    path.file_name().and_then(|p| p.to_str()).unwrap_or("CSV"),
-                );
-                self.refresh_oui_vendors();
-                self.show_toast(self.oui_status.clone());
+    pub fn is_loading_oui(&self) -> bool {
+        self.oui_task.is_some()
+    }
+
+    fn start_oui_restore(&mut self) {
+        let Some(dir) = crate::oui_store::default_dir() else {
+            self.oui_status = "Built-in OUI: no local application data directory".to_owned();
+            return;
+        };
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let task = std::thread::Builder::new()
+            .name("ieee-oui-restore".to_owned())
+            .spawn(move || {
+                let restored = crate::oui_store::restore(&dir);
+                let _ = sender.send(Ok(OuiTaskResult::Restored(restored)));
+            });
+        match task {
+            Ok(_) => {
+                self.oui_task = Some(OuiTask { receiver });
+                self.oui_status = "Restoring IEEE OUI cache...".to_owned();
             }
-            Err(error) => self.show_toast(format!("IEEE OUI import failed: {error}")),
+            Err(error) => self.show_toast(format!("IEEE OUI restore unavailable: {error}")),
+        }
+    }
+
+    pub fn load_oui_file(&mut self, path: &std::path::Path) {
+        if self.oui_task.is_some() {
+            self.show_toast("IEEE OUI import already in progress".to_owned());
+            return;
+        }
+        let Some(cache_dir) = crate::oui_store::default_dir() else {
+            self.show_toast("IEEE OUI cache directory unavailable".to_owned());
+            return;
+        };
+        let source = path.to_path_buf();
+        let filename = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("IEEE CSV")
+            .to_owned();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let task = std::thread::Builder::new()
+            .name("ieee-oui-import".to_owned())
+            .spawn(move || {
+                let result = crate::oui_store::import_and_cache(&source, &cache_dir)
+                    .map(|data| OuiTaskResult::Imported { filename, data });
+                let _ = sender.send(result);
+            });
+        match task {
+            Ok(_) => {
+                self.oui_task = Some(OuiTask { receiver });
+                self.oui_status = format!("Importing IEEE CSV from {}...", path.display());
+            }
+            Err(error) => self.show_toast(format!("Cannot start IEEE OUI import: {error}")),
         }
     }
 
     pub fn reset_oui_registry(&mut self) {
+        if self.oui_task.is_some() {
+            self.show_toast("Wait for IEEE OUI import to finish before resetting".to_owned());
+            return;
+        }
+        let remove_result = crate::oui_store::default_dir()
+            .map(|dir| crate::oui_store::clear_cache(&dir));
         self.oui_registry.reset();
-        self.oui_status = "Built-in OUI list".to_owned();
         self.refresh_oui_vendors();
+        match remove_result {
+            Some(Err(error)) => {
+                self.oui_status = format!("Built-in OUI (cache removal failed: {error})");
+                self.show_toast(self.oui_status.clone());
+            }
+            _ => {
+                self.oui_status = "Built-in OUI list (saved imports removed)".to_owned();
+                self.show_toast("IEEE OUI registry reset".to_owned());
+            }
+        }
+    }
+
+    fn poll_oui_task(&mut self, ctx: &egui::Context) {
+        let outcome = self.oui_task.as_ref().map(|task| task.receiver.try_recv());
+        match outcome {
+            Some(Ok(Ok(OuiTaskResult::Imported { filename, data }))) => {
+                self.oui_task = None;
+                self.oui_registry.replace_kind_from(data.kind, data.registry);
+                self.refresh_oui_vendors();
+                self.oui_status = format!(
+                    "Imported and saved {} {} entries from {filename}",
+                    data.count,
+                    data.kind.label(),
+                );
+                self.show_toast(self.oui_status.clone());
+            }
+            Some(Ok(Ok(OuiTaskResult::Restored(restored)))) => {
+                self.oui_task = None;
+                self.oui_registry = restored.registry;
+                self.refresh_oui_vendors();
+                let count = restored.loaded;
+                if !restored.warnings.is_empty() {
+                    self.oui_status = format!(
+                        "Restored {count} IEEE entries; {} cache warning(s)",
+                        restored.warnings.len(),
+                    );
+                    self.show_toast(format!(
+                        "IEEE OUI cache: {}",
+                        restored.warnings.join("; ")
+                    ));
+                } else if count > 0 {
+                    self.oui_status = format!("Restored {count} saved IEEE OUI entries");
+                } else {
+                    self.oui_status = "Built-in OUI list".to_owned();
+                }
+            }
+            Some(Ok(Err(error))) => {
+                self.oui_task = None;
+                self.oui_status = format!("IEEE OUI import failed: {error}");
+                self.show_toast(self.oui_status.clone());
+            }
+            Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
+                self.oui_task = None;
+                self.oui_status = "IEEE OUI worker disconnected".to_owned();
+                self.show_toast(self.oui_status.clone());
+            }
+            Some(Err(std::sync::mpsc::TryRecvError::Empty)) => {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+            None => {}
+        }
     }
 
     fn refresh_oui_vendors(&mut self) {
@@ -1361,6 +1483,7 @@ fn contains_ascii_case_insensitive(haystack: &str, needle_lower: &str) -> bool {
 impl App {
     pub fn update_ui(&mut self, ui: &mut egui::Ui) {
         self.poll_export_task(ui.ctx());
+        self.poll_oui_task(ui.ctx());
         let processed = self.drain_events_with_budget(MAX_EVENTS_PER_FRAME);
         self.drain_host_enrichment(ui.ctx());
 
