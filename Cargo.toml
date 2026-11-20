@@ -20,6 +20,7 @@ egui = "0.37"
 egui_extras = "0.37"
 get_if_addrs = "0.5"
 dns-lookup = "2.0"
+csv = "1.4"
 ipnet = "2"
 rfd = "0.18"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -38,3 +39,12 @@ tokio-util = "0.7"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
+
+[target.'cfg(windows)'.dependencies]
+# Native, read-only IPv4/IPv6 ARP/NDP cache enumeration via GetIpNetTable2.
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+] }

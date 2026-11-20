@@ -197,12 +197,45 @@ fn render_flat_table(app: &mut App, ui: &mut Ui) {
                         });
                     });
                     if let Some(info) = &info {
+                        let ptr_latency = info.ptr_duration_ms
+                            .map(|ms| format!("{ms} ms"))
+                            .unwrap_or_else(|| "N/A".to_owned());
+                        let ptr_error = match &info.ptr_status {
+                            crate::host_info::PtrStatus::Failed(reason) =>
+                                format!("\nPTR error: {reason}"),
+                            _ => String::new(),
+                        };
+                        let cache_error = info.neighbor_error.as_deref()
+                            .map(|reason| format!("\nNeighbor-cache error: {reason}"))
+                            .unwrap_or_default();
+                        let interfaces = if info.neighbor_interfaces.is_empty() {
+                            String::new()
+                        } else {
+                            format!("\nNeighbor interfaces:\n{}", info.neighbor_interfaces.join("\n"))
+                        };
+                        let ambiguity = if info.neighbor_ambiguous {
+                            "\nAMBIGUOUS: multiple adapters share this IP; MAC not attributed"
+                        } else {
+                            ""
+                        };
+                        let slow_ptr = if info.ptr_duration_ms.is_some_and(|ms| ms >= app.ptr_soft_deadline_ms) {
+                            "\nPTR WARNING: exceeded configured soft deadline (no forced cancellation)"
+                        } else {
+                            ""
+                        };
                         let tooltip = format!(
-                            "PTR: {}\nCached MAC: {}\nOUI: {}\nVendor: {}",
+                            "PTR: {}\nPTR status: {} ({}){}{}\nCached MAC: {}\nOUI: {}\nVendor: {}{}{}{}",
                             info.hostname.as_deref().unwrap_or("N/A"),
-                            info.mac.as_deref().unwrap_or("N/A"),
+                            info.ptr_status.summary(),
+                            ptr_latency,
+                            ptr_error,
+                            slow_ptr,
+                            info.mac.as_deref().unwrap_or("Not in local cache"),
                             info.oui.as_deref().unwrap_or("N/A"),
                             info.vendor.as_deref().unwrap_or("Unknown"),
+                            interfaces,
+                            ambiguity,
+                            cache_error,
                         );
                         address_response.clone().on_hover_text(tooltip);
                     }

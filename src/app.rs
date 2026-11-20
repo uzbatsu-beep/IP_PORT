@@ -1,9 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crate::host_info::{HostInfo, HostInfoWorker};
+use crate::host_info::{HostInfo, HostInfoEvent, HostInfoWorker, PtrStatus};
+use crate::oui_registry::OuiRegistry;
 use crate::scanner::{
     self, PortState, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
 };
@@ -299,6 +300,19 @@ struct ExportTask {
 
 pub type ScanSpawner = fn(ScanConfig) -> Result<ScanHandle, String>;
 
+#[derive(Clone, Debug, Default)]
+pub struct HostInfoStats {
+    pub completed: usize,
+    pub ptr_resolved: usize,
+    pub ptr_no_name: usize,
+    pub ptr_failed: usize,
+    pub mac_found: usize,
+    pub neighbor_failed: usize,
+    pub ptr_over_limit: usize,
+    pub last_ptr_error: Option<String>,
+    pub last_neighbor_error: Option<String>,
+}
+
 pub struct App {
     pub targets_input: String,
     pub ports_input: String,
@@ -306,8 +320,15 @@ pub struct App {
     pub exclusions_input: String,
     pub resolve_ptr: bool,
     pub read_neighbor_cache: bool,
+    pub ptr_soft_deadline_ms: u64,
+    pub oui_registry: OuiRegistry,
+    pub oui_status: String,
     pub host_info: HashMap<IpAddr, HostInfo>,
     host_info_pending: HashSet<IpAddr>,
+    host_info_backlog: VecDeque<IpAddr>,
+    host_info_inflight: HashMap<IpAddr, Instant>,
+    host_info_overdue: HashSet<IpAddr>,
+    pub host_info_stats: HostInfoStats,
     host_info_worker: Option<HostInfoWorker>,
     pub interfaces: Vec<crate::scanner::NetworkInterfaceInfo>,
     pub timeout_ms: u64,
@@ -379,8 +400,15 @@ impl App {
             exclusions_input,
             resolve_ptr: false,
             read_neighbor_cache: false,
+            ptr_soft_deadline_ms: 3_000,
+            oui_registry: OuiRegistry::default(),
+            oui_status: "Built-in OUI list".to_owned(),
             host_info: HashMap::new(),
             host_info_pending: HashSet::new(),
+            host_info_backlog: VecDeque::new(),
+            host_info_inflight: HashMap::new(),
+            host_info_overdue: HashSet::new(),
+            host_info_stats: HostInfoStats::default(),
             host_info_worker: None,
             interfaces: crate::scanner::interfaces::list_interfaces(),
             timeout_ms: 800,
@@ -586,10 +614,11 @@ impl App {
         }
         if !self.host_info.contains_key(&result.ip)
             && !self.host_info_pending.contains(&result.ip)
-            && let Some(worker) = &self.host_info_worker
-            && worker.submit(result.ip)
+            && self.host_info_worker.is_some()
         {
             self.host_info_pending.insert(result.ip);
+            self.host_info_backlog.push_back(result.ip);
+            self.flush_host_info_backlog();
         }
         self.rows.push(ResultRow::from_result(result.clone()));
         self.results.push(result);
@@ -607,20 +636,144 @@ impl App {
         }
     }
 
+    /// Retry requests rejected by the bounded worker queue; no discovered host
+    /// is silently dropped when more than 512 unique IPs arrive in a burst.
+    fn flush_host_info_backlog(&mut self) {
+        for _ in 0..64 {
+            let Some(&ip) = self.host_info_backlog.front() else {
+                break;
+            };
+            let next = self
+                .host_info_worker
+                .as_ref()
+                .map(|worker| worker.submit(ip));
+            match next {
+                Some(Ok(())) => {
+                    self.host_info_backlog.pop_front();
+                }
+                Some(Err(std::sync::mpsc::TrySendError::Full(_))) => break,
+                Some(Err(std::sync::mpsc::TrySendError::Disconnected(_))) => {
+                    self.host_info_worker = None;
+                    self.host_info_backlog.clear();
+                    self.host_info_pending.clear();
+                    self.show_toast("Host identification worker disconnected".to_owned());
+                    break;
+                }
+                None => break,
+            }
+        }
+    }
+
+    pub fn host_info_backlog_len(&self) -> usize {
+        self.host_info_backlog.len()
+    }
+
+    pub fn host_info_pending_len(&self) -> usize {
+        self.host_info_pending.len()
+    }
+
+    pub fn ptr_currently_overdue(&self) -> usize {
+        self.host_info_overdue.len()
+    }
+
+    pub fn load_oui_file(&mut self, path: &std::path::Path) {
+        match self.oui_registry.load_file(path) {
+            Ok((kind, count)) => {
+                self.oui_status = format!(
+                    "Loaded {count} {} assignments from {}",
+                    kind.label(),
+                    path.file_name().and_then(|p| p.to_str()).unwrap_or("CSV"),
+                );
+                self.refresh_oui_vendors();
+                self.show_toast(self.oui_status.clone());
+            }
+            Err(error) => self.show_toast(format!("IEEE OUI import failed: {error}")),
+        }
+    }
+
+    pub fn reset_oui_registry(&mut self) {
+        self.oui_registry.reset();
+        self.oui_status = "Built-in OUI list".to_owned();
+        self.refresh_oui_vendors();
+    }
+
+    fn refresh_oui_vendors(&mut self) {
+        for info in self.host_info.values_mut() {
+            info.vendor = info
+                .mac
+                .as_deref()
+                .and_then(|mac| self.oui_registry.lookup(mac));
+        }
+        self.view_dirty = true;
+    }
+
     fn drain_host_enrichment(&mut self, ctx: &egui::Context) {
         for _ in 0..128 {
             let next = self
                 .host_info_worker
                 .as_ref()
                 .and_then(HostInfoWorker::try_recv);
-            let Some((ip, info)) = next else { break };
-            self.host_info_pending.remove(&ip);
-            self.host_info.insert(ip, info);
-            // Metadata can affect displayed rows and future filter matches.
-            self.view_dirty = true;
+            let Some(event) = next else { break };
+            match event {
+                HostInfoEvent::Started(ip) => {
+                    if self.resolve_ptr {
+                        self.host_info_inflight.insert(ip, Instant::now());
+                    }
+                }
+                HostInfoEvent::Finished(ip, mut info) => {
+                    self.host_info_pending.remove(&ip);
+                    self.host_info_inflight.remove(&ip);
+                    let was_overdue = self.host_info_overdue.remove(&ip);
+                    if self.resolve_ptr
+                        && (was_overdue
+                            || info
+                                .ptr_duration_ms
+                                .is_some_and(|ms| ms >= self.ptr_soft_deadline_ms))
+                        && !was_overdue
+                    {
+                        self.host_info_stats.ptr_over_limit += 1;
+                    }
+                    info.vendor = info
+                        .mac
+                        .as_deref()
+                        .and_then(|mac| self.oui_registry.lookup(mac));
+                    self.host_info_stats.completed += 1;
+                    match &info.ptr_status {
+                        PtrStatus::Disabled => {}
+                        PtrStatus::Resolved => self.host_info_stats.ptr_resolved += 1,
+                        PtrStatus::NoName => self.host_info_stats.ptr_no_name += 1,
+                        PtrStatus::Failed(message) => {
+                            self.host_info_stats.ptr_failed += 1;
+                            self.host_info_stats.last_ptr_error = Some(format!("{ip}: {message}"));
+                        }
+                    }
+                    if info.mac.is_some() {
+                        self.host_info_stats.mac_found += 1;
+                    }
+                    if let Some(message) = &info.neighbor_error {
+                        self.host_info_stats.neighbor_failed += 1;
+                        self.host_info_stats.last_neighbor_error = Some(message.clone());
+                    }
+                    self.host_info.insert(ip, info);
+                    self.view_dirty = true;
+                }
+            }
         }
+        // A soft deadline is an alert only. getnameinfo may continue blocking
+        // on a worker; do not report it as forcibly cancelled or requeue it.
+        for (&ip, &started) in &self.host_info_inflight {
+            if started.elapsed() >= Duration::from_millis(self.ptr_soft_deadline_ms)
+                && self.host_info_overdue.insert(ip)
+            {
+                self.host_info_stats.ptr_over_limit += 1;
+            }
+        }
+        self.flush_host_info_backlog();
         if self.host_info_worker.is_some() {
-            if self.host_info_pending.is_empty() && !self.is_running() {
+            if self.host_info_pending.is_empty()
+                && self.host_info_backlog.is_empty()
+                && !self.is_running()
+            {
                 self.host_info_worker = None;
             } else {
                 ctx.request_repaint_after(Duration::from_millis(125));
@@ -911,6 +1064,7 @@ impl App {
         profile.exclusions = self.exclusions_input.clone();
         profile.resolve_ptr = self.resolve_ptr;
         profile.read_neighbor_cache = self.read_neighbor_cache;
+        profile.ptr_soft_deadline_ms = self.ptr_soft_deadline_ms;
         match crate::profile::save(path, &profile) {
             Ok(()) => {
                 let file_name = path
@@ -942,6 +1096,7 @@ impl App {
                 self.exclusions_input = profile.exclusions;
                 self.resolve_ptr = profile.resolve_ptr;
                 self.read_neighbor_cache = profile.read_neighbor_cache;
+                self.ptr_soft_deadline_ms = profile.ptr_soft_deadline_ms;
                 if let Some(bind) = profile.bind_addr {
                     self.bind_addr_input = bind;
                 } else {
@@ -976,6 +1131,10 @@ impl App {
         self.host_groups.clear();
         self.host_info.clear();
         self.host_info_pending.clear();
+        self.host_info_backlog.clear();
+        self.host_info_inflight.clear();
+        self.host_info_overdue.clear();
+        self.host_info_stats = HostInfoStats::default();
         self.host_info_worker = None;
         self.cached_rtt_stats = None;
         self.rtt_stats_dirty = true;
@@ -1389,6 +1548,53 @@ mod tests {
         let (_terminal_tx, terminal_rx) = std::sync::mpsc::channel();
         let cancel = CancellationToken::new();
         Ok(ScanHandle::from_channels(rx, terminal_rx, cancel))
+    }
+
+    #[test]
+    fn ptr_soft_deadline_warns_once_without_cancelling_worker() {
+        let mut app = App::default_state();
+        app.resolve_ptr = true;
+        app.ptr_soft_deadline_ms = 500;
+        let ip = IpAddr::from([192, 0, 2, 15]);
+        app.host_info_inflight
+            .insert(ip, Instant::now() - Duration::from_secs(2));
+        let ctx = egui::Context::default();
+        app.drain_host_enrichment(&ctx);
+        app.drain_host_enrichment(&ctx);
+        assert_eq!(app.host_info_stats.ptr_over_limit, 1);
+        assert_eq!(app.ptr_currently_overdue(), 1);
+        // A warning is not cancellation; the pending lookup remains accounted for.
+        assert!(app.host_info_inflight.contains_key(&ip));
+        app.clear_results_storage();
+        assert_eq!(app.ptr_currently_overdue(), 0);
+    }
+
+    #[test]
+    fn host_enrichment_retries_full_queue_without_losing_hosts() {
+        // Local worker with PTR and cache access disabled: deterministic and
+        // does not contact any network, but exercises > 512 queued addresses.
+        let mut app = App::default_state();
+        app.host_info_worker = Some(HostInfoWorker::start(false, false).unwrap());
+        let total = 850usize;
+        for n in 0..total {
+            let ip = IpAddr::from([10, 42, (n / 256) as u8, (n % 256) as u8]);
+            app.push_result(ScanResult::new(ip, 80, "test", Duration::from_millis(1)));
+        }
+        assert_eq!(app.host_info_pending_len(), total);
+        let context = egui::Context::default();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.host_info_stats.completed != total {
+            app.drain_host_enrichment(&context);
+            assert!(Instant::now() < deadline, "host enrichment queue stalled");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(app.host_info.len(), total);
+        assert_eq!(app.host_info_pending_len(), 0);
+        assert_eq!(app.host_info_backlog_len(), 0);
+        assert_eq!(app.host_info_stats.ptr_failed, 0);
+        app.clear_results_storage();
+        assert_eq!(app.host_info_stats.completed, 0);
+        assert_eq!(app.host_info_backlog_len(), 0);
     }
 
     fn sample_result(host: u8, port: u16, service: &'static str, rtt_ms: u64) -> ScanResult {

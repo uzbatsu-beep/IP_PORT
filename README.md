@@ -2,6 +2,22 @@
 
 > **v0.4.0 (PR #2, development branch):** scan exclusions (IPv4/IPv6, CIDR, ranges), optional background PTR lookups, and read-only ARP/NDP neighbor-cache MAC/OUI identification. These features are not part of the published v0.3.1 release.
 
+### PR #7 — Offline IEEE MAC registries and interface-aware neighbor cache
+
+From **Host identification**, use **Import IEEE CSV...** to load official IEEE Registration Authority files: MA-L `oui.csv` (24-bit assignments), MA-M `mam.csv` / `oui28.csv` (28-bit), and MA-S `oui36.csv` (36-bit). Use **Reset OUI** to return to the bundled vendor names. Each import replaces only that registry class; imports with malformed records fail without modifying the previous registry. A 16 MiB size limit applies per file. Import is local/offline; files are not bundled or downloaded automatically, and imported registries last until the application closes or Reset is used.
+
+Official downloads: [IEEE Registration Authority](https://standards.ieee.org/products-programs/regauth/). The importer recognizes the CSV fields `Registry`, `Assignment` and `Organization Name`. Lookup chooses the longest matching MA-S → MA-M → MA-L assignment; locally administered and multicast MACs are not assigned guessed manufacturers.
+
+ARP/NDP records include the source interface (Windows `ifIndex`, Linux device name, macOS interface). If an IPv6 link-local address appears on multiple interfaces, the scanner reports **ambiguous MAC** and lists interfaces instead of attaching a random MAC/vendor to that IP. An interface-aware target address (`fe80::...%interface`) is not yet supported by the scanning input parser.
+
+The **PTR warning** slider (500–30,000 ms, saved in scan profiles) sets an **observability deadline**, not a transport timeout. Running lookups exceeding the threshold are counted, but the platform DNS resolver continues to run in its existing bounded worker threads. A warning is not proof that the lookup was cancelled, and cannot enforce a hard upper bound on OS DNS duration.
+
+### Windows MAC/OUI and PTR diagnostics (v0.4.x, PR #6)
+
+On Windows, optional **Read local ARP / NDP cache** uses the OS IP Helper API `GetIpNetTable2`, reading IPv4 and IPv6 neighbor records without active ARP/NDP probes, launching PowerShell or parsing the locale-dependent `arp -a` text. Results are still limited to directly reachable neighbors in the OS cache. MAC-to-manufacturer attribution uses a deliberately small offline OUI dictionary; unknown and locally administered addresses are not guessed. Link-local IPv6 addresses may be ambiguous across interfaces.
+
+When **Resolve reverse DNS (PTR)** is enabled, the Host identification section shows **resolved / no name / resolver errors**, last OS resolver error, number of processed/pending IPs and the queue backlog. Hover a host's IP in the results table to see its PTR state, elapsed resolver time, cached MAC and cache diagnostics. Missing PTR entries may be reported as errors by some operating systems, so **No PTR name** is only shown for explicit missing-name responses. The OS resolver has no guaranteed per-request timeout; it runs in two background threads, not the GUI. When more than 512 IPs arrive, pending lookups are retried rather than dropped.
+
 ### Scope controls in v0.4.0
 
 Use **Exclude targets** in the sidebar to avoid contacting sensitive equipment: `192.168.1.1`, `10.0.0.0/24`, `192.168.1.200-254`, `2001:db8::/64`. Exclusions are evaluated after resolving hostname targets and before scheduling any port probe. Invalid exclusions and an entirely excluded scope block the start of a scan.

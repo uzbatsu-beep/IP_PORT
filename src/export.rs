@@ -793,6 +793,7 @@ mod tests {
                 mac: Some("B8:27:EB:00:11:22".to_owned()),
                 oui: Some("B8:27:EB".to_owned()),
                 vendor: Some("Raspberry Pi Foundation".to_owned()),
+                ..HostInfo::default()
             },
         );
         save_json_enriched(&json_path, &items, &info).unwrap();
