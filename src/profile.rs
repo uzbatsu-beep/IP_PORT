@@ -170,6 +170,7 @@ mod tests {
         assert!(loaded.exclusions.is_empty());
         assert!(!loaded.resolve_ptr);
         assert!(!loaded.read_neighbor_cache);
+        assert_eq!(loaded.ptr_soft_deadline_ms, 3000);
         assert_eq!(loaded.banner_timeout_ms, 1000);
         assert_eq!(loaded.protocol, crate::scanner::ScanProtocol::Tcp);
         let _ = std::fs::remove_file(path);
