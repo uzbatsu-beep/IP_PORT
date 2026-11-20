@@ -374,8 +374,7 @@ mod tests {
         // on the local link. Zero cached entries is a valid result.
         let result = read_windows_neighbor_cache();
         assert!(result.is_ok(), "GetIpNetTable2 query failed: {result:?}");
-        for (ip, mac) in result.unwrap() {
-            assert!(matches!(ip, IpAddr::V4(_) | IpAddr::V6(_)));
+        for (_ip, mac) in result.unwrap() {
             assert_eq!(normalize_mac(&mac), Some(mac));
         }
     }
