@@ -200,8 +200,32 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     .on_hover_text("Background OS resolver lookup for each discovered unique IP. May contact configured DNS servers.");
                 ui.checkbox(&mut app.read_neighbor_cache, "Read local ARP / NDP cache (MAC + OUI)")
                     .on_hover_text("Read-only local operating system neighbor cache; no active discovery packets and no admin access required.");
-                ui.label(RichText::new("MAC is available only for neighboring devices present in the OS cache; vendor identification uses a small offline OUI list.")
+                ui.label(RichText::new("Neighbor-cache MACs are read-only. IEEE CSV imports are offline and do not send probes.")
                     .small().weak());
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("Import IEEE CSV...")
+                        .on_hover_text("Import official IEEE MA-L (oui.csv), MA-M (mam/oui28.csv), or MA-S (oui36.csv) data. Imports replace only that registry class.")
+                        .clicked()
+                        && let Some(path) = rfd::FileDialog::new()
+                            .add_filter("IEEE CSV", &["csv"])
+                            .pick_file()
+                    {
+                        app.load_oui_file(&path);
+                    }
+                    if ui.button("Reset OUI").clicked() {
+                        app.reset_oui_registry();
+                    }
+                });
+                let (mal, mam, mas) = app.oui_registry.counts();
+                ui.label(RichText::new(format!("IEEE OUI entries: MA-L {mal} · MA-M {mam} · MA-S {mas}"))
+                    .small().weak());
+                ui.label(RichText::new(&app.oui_status).small().weak());
+                if app.resolve_ptr {
+                    ui.add(
+                        egui::Slider::new(&mut app.ptr_soft_deadline_ms, 500..=30_000)
+                            .text("PTR warning (ms)"),
+                    ).on_hover_text("Soft deadline: mark a long-running lookup as overdue. The operating system DNS call is not forcibly stopped.");
+                }
                 if app.resolve_ptr || app.read_neighbor_cache {
                     ui.separator();
                     ui.label(
@@ -220,6 +244,13 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                                 app.host_info_stats.ptr_no_name,
                                 app.host_info_stats.ptr_failed,
                             )).small(),
+                        );
+                        ui.label(RichText::new(format!(
+                            "PTR exceeded warning threshold: {} total · {} still running",
+                            app.host_info_stats.ptr_over_limit,
+                            app.ptr_currently_overdue(),
+                        )).small().color(theme::WARNING));
+                        ui.label(RichText::new("Soft deadline only; the OS resolver is allowed to finish.").small().weak());
                         );
                         if let Some(error) = &app.host_info_stats.last_ptr_error {
                             ui.label(RichText::new(format!("Last PTR error: {error}"))
