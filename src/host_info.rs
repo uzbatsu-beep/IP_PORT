@@ -197,6 +197,7 @@ pub fn oui_vendor(mac: &str) -> Option<&'static str> {
     }
 }
 
+#[cfg(any(not(target_os = "windows"), test))]
 pub fn parse_neighbor_cache(output: &str) -> HashMap<IpAddr, String> {
     let mut map = HashMap::new();
     for line in output.lines() {
@@ -223,7 +224,7 @@ pub fn parse_neighbor_cache(output: &str) -> HashMap<IpAddr, String> {
 fn read_neighbor_cache() -> Result<HashMap<IpAddr, String>, String> {
     #[cfg(target_os = "windows")]
     {
-        return read_windows_neighbor_cache();
+        read_windows_neighbor_cache()
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
