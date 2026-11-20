@@ -16,13 +16,6 @@ pub enum RegistryKind {
 }
 
 impl RegistryKind {
-    fn bits(self) -> u32 {
-        match self {
-            Self::MaL => 24,
-            Self::MaM => 28,
-            Self::MaS => 36,
-        }
-    }
     pub fn label(self) -> &'static str {
         match self {
             Self::MaL => "MA-L",
