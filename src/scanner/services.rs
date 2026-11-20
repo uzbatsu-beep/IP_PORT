@@ -52,7 +52,7 @@ pub fn services_count() -> usize {
 
 /// Таблица соответствия портов (массив на 65 536 портов для мгновенного O(1) поиска без хэширования).
 pub struct ServicesDb {
-    table: Box<[Option<&'static str>]>, 
+    table: Box<[Option<&'static str>]>,
     source_description: String,
     total_loaded: usize,
 }
@@ -62,7 +62,11 @@ impl ServicesDb {
     pub fn new() -> Self {
         Self {
             // Allocate the ~1 MiB lookup table directly on the heap.
-            // Box::new([None; 65536]) can first build a huge temporary array\n            // on the calling thread's stack (often only 1 MiB on Windows).\n            // Lazy initialization from the Services database UI then risks\n            // a stack overflow and aborts the whole process.\n            table: vec![None; 65_536].into_boxed_slice(),
+            // Box::new([None; 65536]) can first build a huge temporary array
+            // on the calling thread's stack (often only 1 MiB on Windows).
+            // Lazy initialization from the Services database UI then risks
+            // a stack overflow and aborts the whole process.
+            table: vec![None; 65_536].into_boxed_slice(),
             source_description: "Empty".to_owned(),
             total_loaded: 0,
         }
