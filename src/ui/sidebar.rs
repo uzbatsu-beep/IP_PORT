@@ -251,7 +251,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                             app.ptr_currently_overdue(),
                         )).small().color(theme::WARNING));
                         ui.label(RichText::new("Soft deadline only; the OS resolver is allowed to finish.").small().weak());
-                        );
                         if let Some(error) = &app.host_info_stats.last_ptr_error {
                             ui.label(RichText::new(format!("Last PTR error: {error}"))
                                 .small().color(theme::WARNING));
