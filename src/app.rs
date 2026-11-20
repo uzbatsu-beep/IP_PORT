@@ -1053,6 +1053,7 @@ impl App {
         profile.exclusions = self.exclusions_input.clone();
         profile.resolve_ptr = self.resolve_ptr;
         profile.read_neighbor_cache = self.read_neighbor_cache;
+        profile.ptr_soft_deadline_ms = self.ptr_soft_deadline_ms;
         match crate::profile::save(path, &profile) {
             Ok(()) => {
                 let file_name = path
@@ -1084,6 +1085,7 @@ impl App {
                 self.exclusions_input = profile.exclusions;
                 self.resolve_ptr = profile.resolve_ptr;
                 self.read_neighbor_cache = profile.read_neighbor_cache;
+                self.ptr_soft_deadline_ms = profile.ptr_soft_deadline_ms;
                 if let Some(bind) = profile.bind_addr {
                     self.bind_addr_input = bind;
                 } else {
