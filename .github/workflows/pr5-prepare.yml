@@ -1,0 +1,26 @@
+name: Prepare PR 5 formatting
+on:
+  push:
+    branches: [fix/pr-5-services-db-ownership]
+    paths: [.github/workflows/pr5-prepare.yml]
+permissions:
+  contents: write
+jobs:
+  format-and-cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Format Rust code and remove this one-time workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          git rm .github/workflows/pr5-prepare.yml
+          git add -A
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: rustfmt PR5 services database refactor"
+          git push origin HEAD:refs/heads/fix/pr-5-services-db-ownership
