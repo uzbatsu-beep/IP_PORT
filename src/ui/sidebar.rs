@@ -202,6 +202,44 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     .on_hover_text("Read-only local operating system neighbor cache; no active discovery packets and no admin access required.");
                 ui.label(RichText::new("MAC is available only for neighboring devices present in the OS cache; vendor identification uses a small offline OUI list.")
                     .small().weak());
+                if app.resolve_ptr || app.read_neighbor_cache {
+                    ui.separator();
+                    ui.label(
+                        RichText::new(format!(
+                            "Processed: {} · Pending: {} · Backlog: {}",
+                            app.host_info_stats.completed,
+                            app.host_info_pending_len(),
+                            app.host_info_backlog_len(),
+                        )).small(),
+                    );
+                    if app.resolve_ptr {
+                        ui.label(
+                            RichText::new(format!(
+                                "PTR: {} resolved · {} no name · {} errors",
+                                app.host_info_stats.ptr_resolved,
+                                app.host_info_stats.ptr_no_name,
+                                app.host_info_stats.ptr_failed,
+                            )).small(),
+                        );
+                        if let Some(error) = &app.host_info_stats.last_ptr_error {
+                            ui.label(RichText::new(format!("Last PTR error: {error}"))
+                                .small().color(theme::WARNING));
+                        }
+                    }
+                    if app.read_neighbor_cache {
+                        ui.label(
+                            RichText::new(format!(
+                                "Cached MAC: {} · Neighbor-cache errors: {}",
+                                app.host_info_stats.mac_found,
+                                app.host_info_stats.neighbor_failed,
+                            )).small(),
+                        );
+                        if let Some(error) = &app.host_info_stats.last_neighbor_error {
+                            ui.label(RichText::new(format!("Neighbor cache: {error}"))
+                                .small().color(theme::WARNING));
+                        }
+                    }
+                }
             });
 
         ui.add_space(8.0);
