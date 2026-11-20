@@ -1459,6 +1459,36 @@ mod tests {
         Ok(ScanHandle::from_channels(rx, terminal_rx, cancel))
     }
 
+    #[test]
+    fn host_enrichment_retries_full_queue_without_losing_hosts() {
+        // Local worker with PTR and cache access disabled: deterministic and
+        // does not contact any network, but exercises > 512 queued addresses.
+        let mut app = App::default_state();
+        app.host_info_worker = Some(HostInfoWorker::start(false, false).unwrap());
+        let total = 850usize;
+        for n in 0..total {
+            let ip = IpAddr::from([10, 42, (n / 256) as u8, (n % 256) as u8]);
+            app.push_result(ScanResult::new(
+                ip, 80, "test", Duration::from_millis(1),
+            ));
+        }
+        assert_eq!(app.host_info_pending_len(), total);
+        let context = egui::Context::default();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.host_info_stats.completed != total {
+            app.drain_host_enrichment(&context);
+            assert!(Instant::now() < deadline, "host enrichment queue stalled");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(app.host_info.len(), total);
+        assert_eq!(app.host_info_pending_len(), 0);
+        assert_eq!(app.host_info_backlog_len(), 0);
+        assert_eq!(app.host_info_stats.ptr_failed, 0);
+        app.clear_results_storage();
+        assert_eq!(app.host_info_stats.completed, 0);
+        assert_eq!(app.host_info_backlog_len(), 0);
+    }
+
     fn sample_result(host: u8, port: u16, service: &'static str, rtt_ms: u64) -> ScanResult {
         ScanResult::new(
             IpAddr::V4(Ipv4Addr::new(10, 0, 0, host)),
