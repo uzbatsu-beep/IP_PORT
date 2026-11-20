@@ -367,6 +367,19 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn native_windows_neighbor_enumeration_is_read_only_and_operational() {
+        // Windows CI executes the real IP Helper API without needing hosts
+        // on the local link. Zero cached entries is a valid result.
+        let result = read_windows_neighbor_cache();
+        assert!(result.is_ok(), "GetIpNetTable2 query failed: {result:?}");
+        for (ip, mac) in result.unwrap() {
+            assert!(matches!(ip, IpAddr::V4(_) | IpAddr::V6(_)));
+            assert_eq!(normalize_mac(&mac), Some(mac));
+        }
+    }
+
     #[test]
     fn distinguishes_ptr_success_absence_and_resolver_errors() {
         let ip: IpAddr = "192.0.2.10".parse().unwrap();
