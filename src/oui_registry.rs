@@ -54,6 +54,16 @@ fn globally_assigned(mac: &str) -> Option<u64> {
 }
 
 impl OuiRegistry {
+    /// Move a previously validated registry class into this database; other
+    /// classes stay available without cloning large vendor hash maps.
+    pub fn replace_kind_from(&mut self, kind: RegistryKind, mut imported: Self) {
+        match kind {
+            RegistryKind::MaL => self.ma_l = std::mem::take(&mut imported.ma_l),
+            RegistryKind::MaM => self.ma_m = std::mem::take(&mut imported.ma_m),
+            RegistryKind::MaS => self.ma_s = std::mem::take(&mut imported.ma_s),
+        }
+    }
+
     pub fn counts(&self) -> (usize, usize, usize) {
         (self.ma_l.len(), self.ma_m.len(), self.ma_s.len())
     }
