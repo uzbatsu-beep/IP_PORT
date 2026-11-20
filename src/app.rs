@@ -1,9 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use crate::host_info::{HostInfo, HostInfoWorker};
+use crate::host_info::{HostInfo, HostInfoWorker, PtrStatus};
 use crate::scanner::{
     self, PortState, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
 };
@@ -299,6 +299,18 @@ struct ExportTask {
 
 pub type ScanSpawner = fn(ScanConfig) -> Result<ScanHandle, String>;
 
+#[derive(Clone, Debug, Default)]
+pub struct HostInfoStats {
+    pub completed: usize,
+    pub ptr_resolved: usize,
+    pub ptr_no_name: usize,
+    pub ptr_failed: usize,
+    pub mac_found: usize,
+    pub neighbor_failed: usize,
+    pub last_ptr_error: Option<String>,
+    pub last_neighbor_error: Option<String>,
+}
+
 pub struct App {
     pub targets_input: String,
     pub ports_input: String,
@@ -308,6 +320,8 @@ pub struct App {
     pub read_neighbor_cache: bool,
     pub host_info: HashMap<IpAddr, HostInfo>,
     host_info_pending: HashSet<IpAddr>,
+    host_info_backlog: VecDeque<IpAddr>,
+    pub host_info_stats: HostInfoStats,
     host_info_worker: Option<HostInfoWorker>,
     pub interfaces: Vec<crate::scanner::NetworkInterfaceInfo>,
     pub timeout_ms: u64,
@@ -381,6 +395,8 @@ impl App {
             read_neighbor_cache: false,
             host_info: HashMap::new(),
             host_info_pending: HashSet::new(),
+            host_info_backlog: VecDeque::new(),
+            host_info_stats: HostInfoStats::default(),
             host_info_worker: None,
             interfaces: crate::scanner::interfaces::list_interfaces(),
             timeout_ms: 800,
@@ -586,10 +602,11 @@ impl App {
         }
         if !self.host_info.contains_key(&result.ip)
             && !self.host_info_pending.contains(&result.ip)
-            && let Some(worker) = &self.host_info_worker
-            && worker.submit(result.ip)
+            && self.host_info_worker.is_some()
         {
             self.host_info_pending.insert(result.ip);
+            self.host_info_backlog.push_back(result.ip);
+            self.flush_host_info_backlog();
         }
         self.rows.push(ResultRow::from_result(result.clone()));
         self.results.push(result);
@@ -607,6 +624,35 @@ impl App {
         }
     }
 
+    /// Retry requests rejected by the bounded worker queue; no discovered host
+    /// is silently dropped when more than 512 unique IPs arrive in a burst.
+    fn flush_host_info_backlog(&mut self) {
+        for _ in 0..64 {
+            let Some(&ip) = self.host_info_backlog.front() else { break };
+            let next = self.host_info_worker.as_ref().map(|worker| worker.submit(ip));
+            match next {
+                Some(Ok(())) => { self.host_info_backlog.pop_front(); }
+                Some(Err(std::sync::mpsc::TrySendError::Full(_))) => break,
+                Some(Err(std::sync::mpsc::TrySendError::Disconnected(_))) => {
+                    self.host_info_worker = None;
+                    self.host_info_backlog.clear();
+                    self.host_info_pending.clear();
+                    self.show_toast("Host identification worker disconnected".to_owned());
+                    break;
+                }
+                None => break,
+            }
+        }
+    }
+
+    pub fn host_info_backlog_len(&self) -> usize {
+        self.host_info_backlog.len()
+    }
+
+    pub fn host_info_pending_len(&self) -> usize {
+        self.host_info_pending.len()
+    }
+
     fn drain_host_enrichment(&mut self, ctx: &egui::Context) {
         for _ in 0..128 {
             let next = self
@@ -615,12 +661,32 @@ impl App {
                 .and_then(HostInfoWorker::try_recv);
             let Some((ip, info)) = next else { break };
             self.host_info_pending.remove(&ip);
+            self.host_info_stats.completed += 1;
+            match &info.ptr_status {
+                PtrStatus::Disabled => {}
+                PtrStatus::Resolved => self.host_info_stats.ptr_resolved += 1,
+                PtrStatus::NoName => self.host_info_stats.ptr_no_name += 1,
+                PtrStatus::Failed(message) => {
+                    self.host_info_stats.ptr_failed += 1;
+                    self.host_info_stats.last_ptr_error = Some(format!("{ip}: {message}"));
+                }
+            }
+            if info.mac.is_some() {
+                self.host_info_stats.mac_found += 1;
+            }
+            if let Some(message) = &info.neighbor_error {
+                self.host_info_stats.neighbor_failed += 1;
+                self.host_info_stats.last_neighbor_error = Some(message.clone());
+            }
             self.host_info.insert(ip, info);
             // Metadata can affect displayed rows and future filter matches.
             self.view_dirty = true;
         }
+        self.flush_host_info_backlog();
         if self.host_info_worker.is_some() {
-            if self.host_info_pending.is_empty() && !self.is_running() {
+            if self.host_info_pending.is_empty()
+                && self.host_info_backlog.is_empty()
+                && !self.is_running() {
                 self.host_info_worker = None;
             } else {
                 ctx.request_repaint_after(Duration::from_millis(125));
@@ -976,6 +1042,8 @@ impl App {
         self.host_groups.clear();
         self.host_info.clear();
         self.host_info_pending.clear();
+        self.host_info_backlog.clear();
+        self.host_info_stats = HostInfoStats::default();
         self.host_info_worker = None;
         self.cached_rtt_stats = None;
         self.rtt_stats_dirty = true;
