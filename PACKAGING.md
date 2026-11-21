@@ -2,6 +2,8 @@
 
 Данный документ описывает требования к окружению, системные зависимости, инструкции по локальной сборке и процедуру упаковки бинарных релизов для операционных систем **Windows**, **Linux** и **macOS**.
 
+**Текущий официальный релиз:** [v0.4.0](https://github.com/uzbatsu-beep/IP_PORT/releases/tag/v0.4.0) (Windows x64, Linux x64, macOS Intel/Apple Silicon); SHA-256 публикуется вместе с четырьмя платформенными архивами в `SHA256SUMS.txt`. Бинарники GitHub Actions **не равнозначны официальному релизу** и могут удаляться по сроку хранения.
+
 ---
 
 ## 1. Системные требования
@@ -86,7 +88,8 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 
 # Запуск полного набора тестов
-cargo test
+cargo test --all-targets
+python3 scripts/check_docs.py
 
 # Сборка оптимизированного релизного бинарника
 cargo build --release
@@ -102,9 +105,16 @@ cargo build --release
 
 ### 4.1. Windows
 1. Скачайте архив `ip_port_scanner-vX.Y.Z-x86_64-pc-windows-msvc.zip` со страницы релизов.
-2. Распакуйте архив в любую удобную папку (например, `C:\Tools\ip_port_scanner`).
-3. Запустите `ip_port_scanner.exe`.
-4. (Опционально) Создайте ярлык на рабочем столе или добавьте путь в переменную среды `PATH`.
+2. **Проверьте SHA-256 скачанного ZIP** по файлу `SHA256SUMS.txt` с той же страницы:
+   ```powershell
+   $archive = ".\\ip_port_scanner-v0.4.0-x86_64-pc-windows-msvc.zip"
+   (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+   Get-Content ".\\SHA256SUMS.txt"
+   ```
+   Хэш ZIP должен точно совпадать со строкой этого архива в манифесте. Не сравнивайте SHA-256 EXE с контрольной суммой ZIP.
+3. Распакуйте архив в любую удобную папку (например, `C:\Tools\ip_port_scanner`).
+4. Запустите `ip_port_scanner.exe`.
+5. (Опционально) Создайте ярлык на рабочем столе или добавьте путь в переменную среды `PATH`.
 
 ### 4.2. Linux
 1. Скачайте архив `ip_port_scanner-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz`.
@@ -164,10 +174,27 @@ cargo build --release
 5. Создайте аннотированный тег:
    ```bash
    git tag -a vX.Y.Z -m "Release vX.Y.Z"
-   git push origin main --tags
+   git push origin refs/tags/vX.Y.Z  # только один проверенный тег
    ```
-6. Пайплайн GitHub Actions (`release.yml`) автоматически:
+6. Пайплайн GitHub Actions (`release.yml`) выполняется **только для тега вида `vX.Y.Z`**; перед сборкой проверяется соответствие версии в `Cargo.toml` и тега. Публикация разрешена только после успешной подготовки всех платформ:
+
    - Соберёт релизные бинарники под Windows, Linux, macOS (Apple Silicon и Intel).
    - Упакует архивы `.zip` и `.tar.gz` вместе с `README.md`, `LICENSE` и `CHANGELOG.md`.
    - Рассчитает контрольные суммы `SHA256SUMS.txt`.
    - Опубликует релиз на GitHub Releases с прикреплёнными архивами и чексуммами.
+
+---
+
+## 6. Контроль целостности и публикации
+
+- Скачивайте пакеты только из [Releases](https://github.com/uzbatsu-beep/IP_PORT/releases), а не из сторонних сборок. Имя Windows-пакета: `ip_port_scanner-v0.4.0-x86_64-pc-windows-msvc.zip`.
+- Для Linux/macOS можно проверить один файл командой `sha256sum <имя-архива>` или `shasum -a 256 <имя-архива>`, а затем сравнить с соответствующей строкой `SHA256SUMS.txt`. Проверка `sha256sum -c SHA256SUMS.txt` применима, когда рядом лежат **все** перечисленные архивы.
+- SHA-256 помогает обнаружить повреждение/подмену относительно опубликованного манифеста, но **не заменяет криптографическую подпись издателя**. Текущий release workflow не выполняет Authenticode/Apple notarization или SLSA provenance.
+- В workflow используются минимальные права на чтение для сборочных заданий; публикация требует `contents: write` только в отдельном job. Сборка на обычной ветке через `workflow_dispatch` не должна создавать релиз.
+- После публикации проверьте четыре платформенных архива, `SHA256SUMS.txt`, тег и SHA коммита; архивы должен собирать именно релизный workflow. Чек-лист — [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
+
+## 7. Приёмка и устранение неполадок
+
+- Запускайте Windows EXE сначала на тестовом ПК/изолированной сети; выполните тесты Services database, PTR, ARP/NDP и OUI по [TESTING.md](TESTING.md).
+- При закрытии Windows-приложения откройте `Win+R` → `perfmon /rel` и запишите имя аварийного процесса, модуль и код исключения. `msedgewebview2.exe` может относиться к стороннему приложению — не следует приписывать эту ошибку native egui-сканеру без записи из системного журнала. Подробнее — [OPERATIONS.md](OPERATIONS.md).
+- На macOS запуск неподписанного бинарника может потребовать явного разрешения в **Privacy & Security**. Не рекомендуем отключать Gatekeeper для всей системы; команду `xattr -cr` используйте только после проверки источника и хэша.
