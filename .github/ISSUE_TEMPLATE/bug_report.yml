@@ -9,6 +9,11 @@ body:
         Спасибо, что помогаете улучшать **IP / PORT Scanner**!
         Пожалуйста, заполните форму ниже как можно подробнее.
 
+  - type: markdown
+    attributes:
+      value: |
+        **Безопасность:** перед публикацией удалите пароли, токены, реальные адресные планы OT, конфиденциальные DNS-имена и персональные данные. Уязвимости сообщайте через Security Advisory, а не публичный Issue.
+
   - type: textarea
     id: description
     attributes:
@@ -55,8 +60,8 @@ body:
     id: version
     attributes:
       label: Версия приложения
-      description: Версия IP / PORT Scanner (например, v0.3.0 или хэш коммита).
-      placeholder: v0.3.0
+      description: Версия IP / PORT Scanner (например, v0.4.0 или хэш коммита).
+      placeholder: v0.4.0
     validations:
       required: true
 
