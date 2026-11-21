@@ -29,6 +29,9 @@ jobs:
       - name: Check code formatting
         run: cargo fmt --check
 
+      - name: Check repository Markdown links
+        run: python3 scripts/check_docs.py
+
   check:
     name: Test & Clippy (${{ matrix.os }})
     needs: fmt
