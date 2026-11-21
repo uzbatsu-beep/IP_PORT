@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
@@ -22,7 +22,7 @@ def local_targets(markdown: Path):
     fence_char = ""
     for number, line in enumerate(markdown.read_text(encoding="utf-8").splitlines(), 1):
         stripped = line.lstrip()
-        if stripped.startswith(("```","~~~")):
+        if stripped.startswith(("```", "~~~")):
             # Avoid confusing Markdown link syntax with example source code.
             prefix = stripped[:3]
             if not in_fence:
