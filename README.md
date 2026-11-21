@@ -1,37 +1,24 @@
 # IP / PORT Scanner
 
-> **v0.4.0 (PR #2, development branch):** scan exclusions (IPv4/IPv6, CIDR, ranges), optional background PTR lookups, and read-only ARP/NDP neighbor-cache MAC/OUI identification. These features are not part of the published v0.3.1 release.
+**Актуальный стабильный релиз: [v0.4.0](https://github.com/uzbatsu-beep/IP_PORT/releases/tag/v0.4.0)** · Windows x64 / Linux x64 / macOS Apple Silicon и Intel · лицензия MIT.
 
-### PR #9 — Persistent IEEE OUI cache and responsive imports
+IP / PORT Scanner — настольный TCP/UDP-сканер сетевых адресов и портов на Rust/egui. В версии 0.4.0 доступны исключения целей, обратное разрешение PTR, локальная идентификация MAC/OUI и загрузка официальных IEEE CSV-реестров с сохранением между запусками.
 
-Importing an official IEEE CSV no longer parses up to 16 MiB of data in the GUI rendering thread: the import runs in a worker and displays progress under **Host identification**. Buttons remain disabled until the operation finishes. A successful import saves a validated local copy of the corresponding MA-L, MA-M or MA-S registry in the application data directory (Windows: `%LOCALAPPDATA%\\IP_PORT\\oui`; Linux: `$XDG_DATA_HOME/ip_port/oui` or `~/.local/share/ip_port/oui`; macOS: `~/Library/Application Support/IP_PORT/oui`). Saved registries load automatically in the background when the application starts.
+**Скачать:** [Windows ZIP](https://github.com/uzbatsu-beep/IP_PORT/releases/download/v0.4.0/ip_port_scanner-v0.4.0-x86_64-pc-windows-msvc.zip) · [все платформы](https://github.com/uzbatsu-beep/IP_PORT/releases/tag/v0.4.0) · [SHA256SUMS.txt](https://github.com/uzbatsu-beep/IP_PORT/releases/download/v0.4.0/SHA256SUMS.txt).
 
-An invalid file or unsuccessful write leaves the active registry intact. Reset OUI clears both the in-memory registry and locally cached imports. No external network requests are made to IEEE. Imported files contain only public OUI assignment data, not scan results.
+> **Безопасность:** запускайте сканирование только по разрешённым адресам. В сегментах АСУ ТП / OT сначала определите допустимую область, исключите PLC, роботов и другое критичное оборудование, согласуйте нагрузку и по умолчанию оставляйте сбор баннеров выключенным. TCP/UDP-зондирование является активным сетевым действием. PTR может отправлять DNS-запросы; чтение уже существующего ARP/NDP-кэша дополнительных зондирующих пакетов не отправляет.
 
-### PR #7 — Offline IEEE MAC registries and interface-aware neighbor cache
+### Быстрый старт v0.4.0
 
-From **Host identification**, use **Import IEEE CSV...** to load official IEEE Registration Authority files: MA-L `oui.csv` (24-bit assignments), MA-M `mam.csv` / `oui28.csv` (28-bit), and MA-S `oui36.csv` (36-bit). Use **Reset OUI** to return to the bundled vendor names. Each import replaces only that registry class; imports with malformed records fail without modifying the previous registry. A 16 MiB size limit applies per file. Import is local/offline; files are not bundled or downloaded automatically, and imported registries last until the application closes or Reset is used.
+1. Распакуйте архив из GitHub Releases. Перед запуском сравните SHA-256 файла с `SHA256SUMS.txt`; пример приведён в [PACKAGING.md](PACKAGING.md).
+2. В **Targets** введите адреса или CIDR, в **Ports** — список портов, выберите TCP/UDP и при необходимости `Network Interface`.
+3. Для чувствительных хостов настройте **Exclude targets**: `192.168.1.1`, `10.0.0.0/24`, `192.168.1.200-254`, `2001:db8::/64`. Правила применяются **после DNS A/AAAA** и **до TCP/UDP-проб**.
+4. В **Host identification** при необходимости включите **Reverse DNS (PTR)** и **Read local ARP / NDP cache**. Для более полного определения производителя воспользуйтесь **Import IEEE CSV...**. Официальные MA-L, MA-M, MA-S сохраняются локально и восстанавливаются при запуске; **Reset OUI** сбрасывает импорт.
+5. Нажмите **Start scan**, просматривайте `Flat` / `Group by Host` и сохраните результат в CSV, JSON или HTML.
 
-Official downloads: [IEEE Registration Authority](https://standards.ieee.org/products-programs/regauth/). The importer recognizes the CSV fields `Registry`, `Assignment` and `Organization Name`. Lookup chooses the longest matching MA-S → MA-M → MA-L assignment; locally administered and multicast MACs are not assigned guessed manufacturers.
+**Что означают ограничения:** `Open|Filtered` в UDP не доказывает открытый порт и не имеет измеренного RTT; MAC удалённого узла обычно нельзя получить из локального кэша; одинаковые IPv6 link-local на разных интерфейсах остаются неоднозначными. `PTR warning (ms)` — **мягкий порог предупреждения**, а не гарантированный таймаут или принудительная отмена системного DNS-вызова.
 
-ARP/NDP records include the source interface (Windows `ifIndex`, Linux device name, macOS interface). If an IPv6 link-local address appears on multiple interfaces, the scanner reports **ambiguous MAC** and lists interfaces instead of attaching a random MAC/vendor to that IP. An interface-aware target address (`fe80::...%interface`) is not yet supported by the scanning input parser.
-
-The **PTR warning** slider (500–30,000 ms, saved in scan profiles) sets an **observability deadline**, not a transport timeout. Running lookups exceeding the threshold are counted, but the platform DNS resolver continues to run in its existing bounded worker threads. A warning is not proof that the lookup was cancelled, and cannot enforce a hard upper bound on OS DNS duration.
-
-### Windows MAC/OUI and PTR diagnostics (v0.4.x, PR #6)
-
-On Windows, optional **Read local ARP / NDP cache** uses the OS IP Helper API `GetIpNetTable2`, reading IPv4 and IPv6 neighbor records without active ARP/NDP probes, launching PowerShell or parsing the locale-dependent `arp -a` text. Results are still limited to directly reachable neighbors in the OS cache. MAC-to-manufacturer attribution uses a deliberately small offline OUI dictionary; unknown and locally administered addresses are not guessed. Link-local IPv6 addresses may be ambiguous across interfaces.
-
-When **Resolve reverse DNS (PTR)** is enabled, the Host identification section shows **resolved / no name / resolver errors**, last OS resolver error, number of processed/pending IPs and the queue backlog. Hover a host's IP in the results table to see its PTR state, elapsed resolver time, cached MAC and cache diagnostics. Missing PTR entries may be reported as errors by some operating systems, so **No PTR name** is only shown for explicit missing-name responses. The OS resolver has no guaranteed per-request timeout; it runs in two background threads, not the GUI. When more than 512 IPs arrive, pending lookups are retried rather than dropped.
-
-### Scope controls in v0.4.0
-
-Use **Exclude targets** in the sidebar to avoid contacting sensitive equipment: `192.168.1.1`, `10.0.0.0/24`, `192.168.1.200-254`, `2001:db8::/64`. Exclusions are evaluated after resolving hostname targets and before scheduling any port probe. Invalid exclusions and an entirely excluded scope block the start of a scan.
-
-Under **Host identification**, enable Reverse DNS (PTR) and/or read-only neighbor-cache lookup if needed. PTR may query the configured DNS servers. ARP/NDP inspection does **not** send additional discovery traffic or require administrator privileges; only OS-cached neighbors may have MAC addresses. The built-in OUI map contains a small selection of vendors; unknown or randomized MAC addresses remain unattributed.
-
-Scan profiles preserve these options. JSON and HTML exports include available `hostname`, `mac`, `oui` and `vendor` fields; original CSV v1 remains compatible. For operational-technology networks, always review the target and exclusion lists before starting a scan.
-
+Руководства: [архитектура](ARCHITECTURE.md), [план развития](ROADMAP.md), [установка и проверка архивов](PACKAGING.md), [сценарии тестирования](TESTING.md), [практическая эксплуатация](OPERATIONS.md), [IEEE OUI](OUI_DATA.md), [аудит репозитория](AUDIT.md).
 
 Кроссплатформенное приложение для сканирования IP-адресов, TCP- и UDP-портов с современным интерфейсом на Rust.
 
@@ -77,7 +64,11 @@ Scan profiles preserve these options. JSON and HTML exports include available `h
 ```
 src/
 ├── main.rs          # точка входа, инициализация eframe
-├── app.rs           # состояние UI и обработка событий
+├── app.rs           # состояние UI, фоновые задачи, очереди и результаты
+├── host_info.rs     # PTR, ARP/NDP и интерфейсные записи
+├── oui_registry.rs  # IEEE MA-L/MA-M/MA-S и longest-prefix matching
+├── oui_store.rs     # локальный персистентный OUI-кэш с восстановлением
+├── profile.rs       # сохранение настроек сканирования
 ├── ui/
 │   ├── mod.rs       # регистрация панелей интерфейса
 │   ├── quick_actions.rs # контекстные быстрые действия и генераторы команд
@@ -89,10 +80,12 @@ src/
 │   ├── mod.rs       # запуск и управление сканированием
 │   ├── interfaces.rs # обнаружение локальных сетевых интерфейсов
 │   ├── presets.rs   # пресеты портов для TCP и UDP со сжатием диапазонов
-│   ├── targets.rs   # разбор целей: IP, CIDR, диапазоны портов
+│   ├── targets.rs   # разбор целей: IP, CIDR, DNS и диапазоны
+│   ├── scope.rs     # правила исключения адресов
+│   ├── services.rs  # встроенная и внешняя база названий сервисов
 │   ├── probe.rs     # TCP-connect и маршрутизация проб с таймаутом
 │   └── udp.rs       # UDP-зондирование, payload-пробы и классификация ошибок
-└── export.rs        # сохранение результатов в CSV / JSON
+└── export.rs        # CSV / JSON / автономный HTML
 ```
 
 Сканирование выполняется в отдельном Tokio-рантайме. События передаются в UI через канал
@@ -140,7 +133,7 @@ cargo test
 
 Цели, приоритеты и критерии готовности этапов описаны в [плане разработки](ROADMAP.md).
 Текущее устройство и технические ограничения описаны в [архитектуре](ARCHITECTURE.md).
-После завершения работы обновляйте эти документы вместе с кодом, чтобы сохранять контекст. Проверки базового среза (96 тестов, Windows, 2026-11-18); в v0.3.1 добавлены регрессионные тесты: `cargo fmt --check`, `cargo test` и `cargo clippy --all-targets -- -D warnings`.
+После каждого изменения обновляйте документацию вместе с кодом и запускайте `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets` и `python3 scripts/check_docs.py`. Матричный CI проверяет Windows, Linux и macOS; подробности приведены в [TESTING.md](TESTING.md).
 
 ## Лицензия
 
