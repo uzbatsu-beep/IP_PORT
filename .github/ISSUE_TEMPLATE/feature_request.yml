@@ -33,7 +33,7 @@ body:
       description: Рассматривали ли вы другие подходы или аналогичные инструменты?
       placeholder: В Nmap / Advanced Port Scanner это реализовано через...
     validations:
-      false
+      required: false
 
   - type: textarea
     id: additional-context

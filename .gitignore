@@ -1,3 +1,14 @@
 /target
 *.pdb
 dist/
+# Local environment and IDE artifacts
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+*.tmp
+__pycache__/
