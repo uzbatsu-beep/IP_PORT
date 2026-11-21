@@ -7,11 +7,12 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-release:
     name: Build (${{ matrix.target }})
+    if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: false
       matrix:
@@ -35,6 +36,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validate release tag and Cargo package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          [[ "$TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]] || {
+            echo "::error::Expected exact SemVer tag (vX.Y.Z), got $TAG"
+            exit 1
+          }
+          VERSION="${TAG#v}"
+          grep -Fqx "version = \\"$VERSION\\"" Cargo.toml || {
+            echo "::error::Cargo.toml version does not match tag $TAG"
+            exit 1
+          }
 
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
@@ -92,7 +108,10 @@ jobs:
   publish-release:
     name: Publish GitHub Release
     needs: build-release
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -103,10 +122,23 @@ jobs:
           pattern: package-*
           merge-multiple: true
 
-      - name: Compute SHA-256 checksums
+      - name: Verify complete release archives and compute SHA-256
         working-directory: release-artifacts
+        shell: bash
         run: |
-          sha256sum * > SHA256SUMS.txt
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          for TARGET in x86_64-pc-windows-msvc x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin; do
+            EXT=tar.gz
+            [[ "$TARGET" == *windows-msvc ]] && EXT=zip
+            test -s "ip_port_scanner-${TAG}-${TARGET}.${EXT}" || {
+              echo "::error::Missing package for $TARGET"
+              exit 1
+            }
+          done
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 4
+          LC_ALL=C sha256sum ip_port_scanner-* > SHA256SUMS.txt
+          sha256sum --check SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Create GitHub Release
