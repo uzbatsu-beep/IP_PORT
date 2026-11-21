@@ -1,0 +1,27 @@
+name: Launch vision documentation checks
+on:
+  push:
+    branches: [docs/approved-industrial-asset-vision]
+    paths: [.github/workflows/docs-vision-ci-launcher.yml]
+permissions:
+  contents: write
+  actions: write
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Remove temporary helper and run normal CI on final branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/docs-vision-ci-launcher.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: remove one-time docs CI dispatcher"
+          git push origin HEAD:refs/heads/docs/approved-industrial-asset-vision
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref docs/approved-industrial-asset-vision
