@@ -220,3 +220,10 @@
 - Typed navigation, original vector icons, compact/expanded rail and persistent RU/EN shell preference.
 - Diagnostics, Knowledge Base and Reports use existing application services; scan lifecycle remains global.
 - Offline source-backed industrial protocol catalog (52 entries), no new active scanning behavior.
+
+
+### UI-03.3 (unreleased)
+
+- Two-level global toolbar and centralized command availability/dispatch; profile shortcuts Ctrl/Cmd+O and Ctrl/Cmd+S.
+- Active scan context snapshot; guarded profile/target changes; export remains available during scanning.
+- Discovery command duplicates removed; scan engine, profiles and export formats unchanged. Industrial knowledge catalog retained.

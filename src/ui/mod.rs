@@ -1,3 +1,4 @@
+pub mod commands;
 pub mod components;
 pub mod icons;
 pub mod knowledge;
@@ -8,6 +9,7 @@ pub mod results;
 pub mod rtt_view;
 pub mod sidebar;
 pub mod theme;
+pub mod toolbar;
 pub mod views;
 pub mod workspace;
 

@@ -43,7 +43,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     ui.add_space(12.0);
 
     let running = app.is_running();
-    let stopping = app.is_stopping();
     ui.add_enabled_ui(!running, |ui| {
         ui.label(RichText::new("Protocol").strong());
         ui.horizontal(|ui| {
@@ -288,31 +287,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             });
 
         ui.add_space(8.0);
-        ui.horizontal_wrapped(|ui| {
-            if ui
-                .button("Save profile...")
-                .on_hover_text("Save targets, ports, timeout, concurrency and banner settings as JSON")
-                .clicked()
-                && let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("scan_profile.json")
-                    .add_filter("JSON profile", &["json"])
-                    .save_file()
-            {
-                app.save_profile(&path);
-            }
-            if ui
-                .button("Load profile...")
-                .on_hover_text("Load and validate settings from a JSON profile")
-                .clicked()
-                && let Some(path) = rfd::FileDialog::new()
-                    .add_filter("JSON profile", &["json"])
-                    .pick_file()
-            {
-                app.load_profile(&path);
-            }
-        });
-
-        ui.add_space(8.0);
         egui::CollapsingHeader::new(RichText::new("Services database").small().strong())
             .default_open(false)
             .show(ui, |ui| {
@@ -366,73 +340,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     ui.add_space(8.0);
     scope_feedback(&preview, running, ui);
     ui.add_space(10.0);
-
-    ui.horizontal_wrapped(|ui| {
-        let cmd = crate::ui::cmd_key_name();
-        let can_start = !running && preview.is_ok();
-        let start = components::primary_button(ui, "Start scan");
-        let start_hover = match &preview {
-            Ok(_) => format!("Begin scanning the configured targets and ports ({cmd}+Enter)"),
-            Err(err) => err.clone(),
-        };
-        if ui
-            .add_enabled(can_start, start)
-            .on_hover_text(&start_hover)
-            .clicked()
-        {
-            app.start_scan();
-        }
-
-        let stop_label = if stopping { "Stopping..." } else { "Stop" };
-        let stop_button = components::danger_button(ui, stop_label, running && !stopping);
-        if ui
-            .add_enabled(running && !stopping, stop_button)
-            .on_hover_text("Cancel the current scan (Esc)")
-            .clicked()
-        {
-            app.stop_scan();
-        }
-
-        let can_export = !app.results.is_empty() && !app.is_exporting();
-        let export_hint = if app.is_exporting() {
-            "An export is already in progress"
-        } else if running {
-            "Save a snapshot of all collected open ports (ignores active table filter)"
-        } else {
-            "Save all collected open ports (ignores active table filter)"
-        };
-        ui.add_enabled_ui(can_export, |ui| {
-            ui.menu_button("Export ▾", |ui| {
-                ui.set_min_width(140.0);
-                if ui
-                    .button(format!("Export CSV ({cmd}+E)"))
-                    .on_hover_text(format!("{export_hint} as CSV"))
-                    .clicked()
-                {
-                    app.export_csv();
-                    ui.close();
-                }
-                if ui
-                    .button(format!("Export JSON ({cmd}+Shift+E)"))
-                    .on_hover_text(format!("{export_hint} as JSON"))
-                    .clicked()
-                {
-                    app.export_json();
-                    ui.close();
-                }
-                if ui
-                    .button("Export HTML report...")
-                    .on_hover_text(format!("{export_hint} as interactive HTML report"))
-                    .clicked()
-                {
-                    app.export_html();
-                    ui.close();
-                }
-            })
-            .response
-            .on_hover_text(format!("{export_hint} (CSV / JSON / HTML)"));
-        });
-    });
 
     if !app.status.is_empty() {
         ui.add_space(6.0);

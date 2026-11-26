@@ -158,3 +158,6 @@ The startup view groups observations by IP (Devices); Ports retains the existing
 
 
 UI-03.2 adds six functional routes and collapsible vector navigation, persistent shell language, and an offline [industrial protocol reference](INDUSTRIAL_PROTOCOLS.md). No new active discovery adapters are enabled.
+
+
+UI-03.3 adds a global two-level toolbar: start/stop, profiles, export, scan context, theme and settings. Ctrl/Cmd+O loads a profile and Ctrl/Cmd+S saves one when no scan is active. Reports uses the same command dispatcher; Discovery retains configuration, not duplicated controls.
