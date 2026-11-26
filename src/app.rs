@@ -1238,6 +1238,7 @@ impl App {
     pub fn load_profile(&mut self, path: &std::path::Path) {
         match crate::profile::load(path) {
             Ok(profile) => {
+                self.workspace.discovery = ui::discovery::DiscoveryState::custom();
                 self.targets_input = profile.targets;
                 self.ports_input = profile.ports;
                 self.timeout_ms = profile.timeout_ms;

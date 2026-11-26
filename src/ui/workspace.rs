@@ -12,6 +12,7 @@ pub struct Workspace {
     pub language: Language,
     pub expanded: bool,
     pub knowledge_query: String,
+    pub discovery: crate::ui::discovery::DiscoveryState,
     preference_path: Option<std::path::PathBuf>,
     pub preference_error: Option<String>,
 }

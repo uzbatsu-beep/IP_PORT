@@ -1,41 +1,7 @@
-//! Read-only offline reference. Never dispatch probes from catalog entries.
+//! Read-only offline reference; catalog loading is shared with Discovery.
 use super::preferences::Language;
+use crate::knowledge_service::catalog;
 use egui::Ui;
-use serde::Deserialize;
-use std::sync::OnceLock;
-
-#[derive(Deserialize)]
-struct Catalog {
-    schema_version: u32,
-    reviewed: String,
-    entries: Vec<Entry>,
-}
-
-#[derive(Deserialize)]
-struct Entry {
-    id: String,
-    vendor: String,
-    family: String,
-    transport: String,
-    ports: String,
-    purpose: String,
-    notes: String,
-    kind: String,
-    source: String,
-}
-
-fn catalog() -> &'static Result<Catalog, String> {
-    static DATA: OnceLock<Result<Catalog, String>> = OnceLock::new();
-    DATA.get_or_init(|| {
-        let data: Catalog =
-            serde_json::from_str(include_str!("../../data/industrial_protocols.json"))
-                .map_err(|error| error.to_string())?;
-        if data.schema_version != 1 {
-            return Err("Unsupported catalog schema".to_owned());
-        }
-        Ok(data)
-    })
-}
 
 pub fn show(query: &mut String, language: Language, ui: &mut Ui) {
     ui.heading(language.text(

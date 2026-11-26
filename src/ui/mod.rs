@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod components;
+pub mod discovery;
 pub mod icons;
 pub mod knowledge;
 pub mod navigation;

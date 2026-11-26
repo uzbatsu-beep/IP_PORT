@@ -288,3 +288,6 @@ UI-03.2 adds typed routes in navigation.rs, original vector icons in icons.rs, r
 
 
 UI-03.3 centralizes application actions in `ui/commands.rs`. Toolbar and keyboard handlers use identical state guards; route-local reports call the same dispatcher. `ui/toolbar.rs` renders the global two-level panel using shared App state and a snapshot of successfully spawned scan inputs. Scanner and export lifecycles remain independent of the active route.
+
+
+UI-03.4 adds `knowledge_service.rs` as the shared read-only catalog/source facade; discovery.rs consumes curated catalog record IDs and existing port parsing/formatting helpers. The catalog is not the scanner's service registry or a probe dispatch table. Scope validation remains exclusively in App::refresh_input_preview and InputCache. UI modes are transient; profile v1 remains unchanged.
