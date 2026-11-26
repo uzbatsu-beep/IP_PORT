@@ -305,8 +305,8 @@ Shared components, semantic status colors, reusable panel surfaces and table met
 
 | Stage | Scope | State |
 | --- | --- | --- |
-| UI-03.1 | Workspace shell, real navigation entry points, existing grouped host view on startup, observed-host inspector, shell RU/EN | Implementation in PR; CI and manual acceptance pending |
-| UI-03.2 | Navigation and context state | Planned |
+| UI-03.1 | Workspace shell, real navigation entry points, existing grouped host view on startup, observed-host inspector, shell RU/EN | Merged; manual Windows acceptance pending |
+| UI-03.2 | Navigation, language persistence, offline industrial protocol reference | In PR; CI pending |
 | UI-03.3 | Global toolbar | Planned |
 | UI-03.4 | Discovery panel and settings localization | Planned |
 | UI-03.5 | Device/port results, virtualized device presentation | Planned |

@@ -24,3 +24,8 @@ RU/EN currently covers shell labels, not existing scanner controls, diagnostic m
 - Manual Windows acceptance: start and stop scans, select Devices/Ports, change appearance from Settings, return to Discovery, verify filter/sort/keyboard shortcuts and export. Check selection, narrow inspector, language labels and icon rendering in both themes and at 100–200% DPI.
 - Existing grouped view is not virtualized for very large datasets; Ports retains the optimized table. Device-view virtualization is UI-03.5. No new network I/O or identities are introduced by the shell.
 - UI-03.1 is not a finished redesign. Global action toolbar, full localization, full inspector and status detail follow the agreed stage sequence.
+
+
+## UI-03.2 — Navigation
+
+Six functional routes; Discovery at startup, grouped results by default. Navigation only changes route, never scanner state, view mode, filter or selection. Compact/expanded original line icons use egui painter. Non-result routes suppress result-specific keyboard commands; stop remains available while scanning. Full global toolbar follows UI-03.3. Language preference stored separately in workspace-language.json (schema 1), restored at startup; existing appearance.json unaffected. Shell and new route labels bilingual; full legacy translation follows UI-03.7. Expansion is session-only. Knowledge contains current OUI functions (disabled during active scan, as in Discovery) and the offline [industrial protocol catalog](INDUSTRIAL_PROTOCOLS.md). No network activity on route change.
