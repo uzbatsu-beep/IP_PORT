@@ -206,3 +206,10 @@
 - Shared theme-aware action buttons, status text, panel surfaces, metric rows, empty states and table row height.
 - Light-theme RTT severity shades; no changes to latency statistics or scan behavior.
 - Headless component and populated-view rendering tests across all 16 appearances.
+
+
+### UI-03.1 (unreleased)
+
+- Engineering Workspace shell with header, navigation rail, context panel, central results, observed-host inspector and status strip.
+- Devices (existing IP grouping) on native startup; Ports remains available. Shell-only RU/EN selector.
+- Navigation and responsive shell tests; no scanner, protocol, export or persistent Asset Store changes.

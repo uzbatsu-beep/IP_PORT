@@ -4,14 +4,9 @@ use crate::app::{App, ScopePreview, StatusLevel};
 use crate::scanner::presets;
 use crate::ui::{components, theme};
 
-pub fn show(app: &mut App, ui: &mut Ui) {
-    ui.add_space(4.0);
-    components::section_heading(ui, "IP / PORT Scanner");
-    ui.label(RichText::new("Async TCP & UDP port scanner").weak());
-    ui.add_space(12.0);
-
+pub fn show_appearance(app: &mut App, ui: &mut Ui) {
     egui::CollapsingHeader::new("Appearance")
-        .default_open(false)
+        .default_open(true)
         .show(ui, |ui| {
             let previous = app.appearance;
             ui.horizontal(|ui| {
@@ -39,7 +34,13 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
             }
         });
-    ui.add_space(8.0);
+}
+
+pub fn show(app: &mut App, ui: &mut Ui) {
+    ui.add_space(4.0);
+    components::section_heading(ui, "IP / PORT Scanner");
+    ui.label(RichText::new("Async TCP & UDP port scanner").weak());
+    ui.add_space(12.0);
 
     let running = app.is_running();
     let stopping = app.is_stopping();

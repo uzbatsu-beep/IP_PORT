@@ -324,6 +324,7 @@ pub struct HostInfoStats {
 }
 
 pub struct App {
+    pub workspace: ui::workspace::Workspace,
     pub appearance: ui::theme::Appearance,
     appearance_path: Option<PathBuf>,
     pub appearance_error: Option<String>,
@@ -392,6 +393,7 @@ pub struct App {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut app = Self::default_state();
+        app.view_mode = ui::workspace::initial_view();
         app.appearance_path = ui::theme::settings_path();
         if let Some(path) = &app.appearance_path {
             match ui::theme::load(path) {
@@ -419,6 +421,7 @@ impl App {
         );
 
         Self {
+            workspace: ui::workspace::Workspace::default(),
             appearance: ui::theme::Appearance::default(),
             appearance_path: None,
             appearance_error: None,
@@ -1634,19 +1637,7 @@ impl App {
             ui.ctx().request_repaint_after(delay);
         }
 
-        egui::Panel::left("controls")
-            .resizable(true)
-            .default_size(320.0)
-            .size_range(280.0..=460.0)
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui::sidebar::show(self, ui);
-                });
-            });
-
-        egui::CentralPanel::default().show(ui, |ui| {
-            ui::results::show(self, ui);
-        });
+        ui::workspace::show(self, ui);
 
         self.render_toasts(ui.ctx());
     }

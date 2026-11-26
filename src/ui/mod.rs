@@ -4,6 +4,7 @@ pub mod results;
 pub mod rtt_view;
 pub mod sidebar;
 pub mod theme;
+pub mod workspace;
 
 /// Возвращает имя клавиши модификатора команд в зависимости от целевой ОС (Cmd для macOS, Ctrl для Linux/Windows).
 pub fn cmd_key_name() -> &'static str {

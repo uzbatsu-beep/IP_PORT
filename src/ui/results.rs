@@ -5,8 +5,9 @@ use crate::app::{App, SortColumn};
 use crate::ui::components::{self, Tone};
 
 pub fn show(app: &mut App, ui: &mut Ui) {
+    let language = app.workspace.language;
     ui.horizontal(|ui| {
-        components::section_heading(ui, "Results");
+        components::section_heading(ui, language.text("Results", "Результаты"));
         ui.label(
             RichText::new(format!("{} stored", app.results.len()))
                 .weak()
@@ -56,14 +57,14 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let is_grouped = app.view_mode == crate::app::ResultsViewMode::GroupedByHost;
             if ui
-                .selectable_label(is_grouped, "🗂 By Host")
+                .selectable_label(is_grouped, language.text("Devices", "Устройства"))
                 .on_hover_text("Group results by host in a collapsible tree")
                 .clicked()
             {
                 app.view_mode = crate::app::ResultsViewMode::GroupedByHost;
             }
             if ui
-                .selectable_label(!is_grouped, "☰ Flat")
+                .selectable_label(!is_grouped, language.text("Ports", "Порты"))
                 .on_hover_text("Show all ports in a flat table")
                 .clicked()
             {
