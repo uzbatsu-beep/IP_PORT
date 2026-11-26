@@ -294,3 +294,8 @@
 ## UI-01 — Appearance foundation
 
 Implementation scope: independent Light/Dark and eight accent palettes, automatic per-user persistence, explicit reset, theme-aware widgets and status colors. See [UI appearance](UI_APPEARANCE.md). UI-02 (component normalization) and UI-03 (workspace redesign) follow Windows visual acceptance; previously approved industrial asset identification remains in scope and is not reprioritized by this change.
+
+
+## UI-02 — Design system
+
+Shared components, semantic status colors, reusable panel surfaces and table metrics precede UI-03 (workspace redesign). CI must validate the new component and full-view headless tests. Manual Windows visual acceptance remains required before release. Industrial device identification and scanner behavior are unchanged.

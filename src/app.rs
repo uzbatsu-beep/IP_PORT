@@ -2599,6 +2599,35 @@ mod tests {
     }
 
     #[test]
+    fn design_system_renders_results_in_all_appearances() {
+        use crate::ui::theme::{Appearance, Palette, Theme};
+
+        let mut app = App::default_state();
+        app.push_result(ScanResult::new(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            80,
+            crate::scanner::probe::service_name(80),
+            Duration::from_millis(2),
+        ));
+        app.selected_result = Some(0);
+        for theme in [Theme::Light, Theme::Dark] {
+            for palette in Palette::ALL {
+                let ctx = egui::Context::default();
+                app.appearance = Appearance { theme, palette };
+                crate::ui::theme::apply_appearance(&ctx, app.appearance);
+                for mode in [ResultsViewMode::Flat, ResultsViewMode::GroupedByHost] {
+                    app.view_mode = mode;
+                    let output =
+                        run_headless_frame(&mut app, &ctx, egui::vec2(1180.0, 760.0), 1.0, vec![]);
+                    assert!(!output.shapes.is_empty());
+                    assert_eq!(app.results.len(), 1);
+                    assert_eq!(app.selected_result, Some(0));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn window_resizing_and_dpi_scaling_test() {
         let mut app = App::default_state();
         let ctx = egui::Context::default();
