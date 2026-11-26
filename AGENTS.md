@@ -31,3 +31,5 @@ These rules apply to the entire repository, including automated contributors.
 
 - Keep roadmap, decisions, architecture, test docs and Unreleased changelog consistent. Record limitations and open work.
 - Follow [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). No tag or public release without explicit approval and verified CI for that commit.
+
+- Preserve mandatory Quality Gate dependencies and fail-closed release verification. No advisory exceptions, new permitted licenses or automatic merges without review. Keep optimized performance scenarios complete and report cold start separately; do not discard measured samples.

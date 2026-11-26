@@ -54,3 +54,6 @@ cargo build --release
 ## ENG-01.A
 
 Use the pinned Rust 1.100.0 toolchain and `--locked` for Cargo check/clippy/test/build. Run the cross-platform preflight in [ENGINEERING.md](ENGINEERING.md). After repeated Windows failures, 20k performance and 100k stress tests are executed sequentially in separate processes via `python scripts/preflight.py --tests-only`; exact test discovery is required. The 20k test logs five fixed warm-up frames (including cold start) separately, then measures all 60 steady-state frames with mean <16 ms and P95 <25 ms unchanged. Cold-start times are not subject to those steady-state gates. The 100k functional assertions are unchanged. Optimized-profile benchmarking, more scenarios and JSON metrics remain ENG-01.B. The MSRV check remains an independent locked build on 1.95.0.
+
+
+ENG-01.B: the existing isolated debug tests remain unchanged; optimized matrix is excluded from functional test command and executed explicitly by scripts/performance.py with release profile. Exact test discovery and report validation prevent false positives. See [PERFORMANCE.md](PERFORMANCE.md). Engineering scripts have independent unittest coverage.

@@ -310,8 +310,8 @@ Shared components, semantic status colors, reusable panel surfaces and table met
 | UI-03.3 | Global toolbar and command dispatcher | Merged; manual acceptance pending |
 | UI-03.4 | Discovery modes, catalog-backed presets, Knowledge Service, ScopePreview, v0.5.0 preparation | Merged; manual acceptance pending |
 | UI-03.5 | Virtualized Devices/Ports, filters, selection, evidence, catalog integrity | Merged; manual acceptance pending |
-| ENG-01.A | Development infrastructure and pinned toolchain | In PR; CI pending |
-| ENG-01.B | Quality & Performance Pipeline | Approved; after A |
+| ENG-01.A | Development infrastructure and pinned toolchain | Merged; CI passed |
+| ENG-01.B | Quality & Performance Pipeline | In PR; CI pending |
 | ENG-01.C | ResultsStore / ResultsProjection / SelectionState | Approved; after B |
 | ENG-01.D | Engineering acceptance | Approved; after C |
 | UI-03.6 | Universal inspector and evidence sections | Planned; after ENG-01 |

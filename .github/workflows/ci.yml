@@ -29,8 +29,8 @@ jobs:
         run: rustup show
       - name: Check code formatting and repository Markdown links
         run: python3 scripts/preflight.py --format-only
-      - name: Test preflight command selection and failure propagation
-        run: python3 -m unittest discover -s scripts -p 'test_preflight.py'
+      - name: Test engineering scripts
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
   check:
     name: Test & Clippy (${{ matrix.os }})
@@ -82,6 +82,18 @@ jobs:
       - name: Run functional and isolated performance tests
         run: python scripts/preflight.py --tests-only
 
+      - name: Optimized Performance QA
+        run: python scripts/performance.py
+
+      - name: Upload performance report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: performance-${{ matrix.target }}
+          path: target/performance-report.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Build optimized release binary
         run: cargo build --locked --release --target ${{ matrix.target }}
 
@@ -92,6 +104,8 @@ jobs:
           path: |
             target/${{ matrix.target }}/release/ip_port_scanner
             target/${{ matrix.target }}/release/ip_port_scanner.exe
+            THIRD_PARTY_NOTICES.md
+            third-party/epaint_default_fonts/
           if-no-files-found: error
           retention-days: 7
 
@@ -123,3 +137,78 @@ jobs:
 
       - name: Check compilation on MSRV
         run: cargo +1.95.0 check --locked --all-targets
+
+  dependencies:
+    name: Dependency Audit
+    needs: fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain and audit tools
+        run: |
+          rustup show
+          cargo +1.100.0 install --locked --version 0.23.0 cargo-audit
+          cargo +1.100.0 install --locked --version 0.22.1 cargo-deny
+      - name: RustSec audit
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo audit --json | tee cargo-audit.json
+      - name: Dependency policy
+        if: always()
+        shell: bash
+        run: |
+          set -o pipefail
+          status=0
+          cargo deny --locked --format json check > cargo-deny.json 2> cargo-deny-diagnostics.json || status=$?
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          for line in Path("cargo-deny-diagnostics.json").read_text(encoding="utf-8").splitlines():
+              try:
+                  record = json.loads(line)
+                  fields = record.get("fields", {})
+                  if record.get("type") == "summary":
+                      print(json.dumps(fields))
+                  elif fields.get("severity") in ("error", "warning"):
+                      print(f"{fields['severity']}: {fields.get('code', '')}: {fields.get('message', '')}")
+                      for label in fields.get("labels", []):
+                          if label.get("message"):
+                              print(f"  {label['message']}: {label.get('span', '')}")
+              except (ValueError, TypeError, AttributeError):
+                  print(line)
+          PY
+          exit "$status"
+      - name: Upload dependency reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dependency-audit
+          path: |
+            cargo-audit.json
+            cargo-deny.json
+            cargo-deny-diagnostics.json
+          if-no-files-found: error
+          retention-days: 30
+
+  quality-gate:
+    name: Quality Gate
+    needs: [fmt, check, msrv, dependencies]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all mandatory checks
+        env:
+          FORMAT: ${{ needs.fmt.result }}
+          MATRIX: ${{ needs.check.result }}
+          MSRV: ${{ needs.msrv.result }}
+          DEPS: ${{ needs.dependencies.result }}
+        run: |
+          set -euo pipefail
+          printf 'format=%s matrix=%s msrv=%s dependencies=%s\n' "$FORMAT" "$MATRIX" "$MSRV" "$DEPS"
+          test "$FORMAT" = success
+          test "$MATRIX" = success
+          test "$MSRV" = success
+          test "$DEPS" = success

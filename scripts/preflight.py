@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PERFORMANCE_TESTS = (
     "app::tests::stress_benchmark_events_sorting_and_rendering",
     "app::tests::virtualized_device_rows_at_storage_limit",
+    "app::tests::performance_matrix_optimized",
 )
 
 
@@ -22,7 +23,7 @@ def test_commands(channel: str) -> list[list[str]]:
         functional.extend(["--skip", name])
     isolated = [
         [*cargo, "--bin", "ip_port_scanner", name, "--", "--exact", "--test-threads=1", "--nocapture"]
-        for name in PERFORMANCE_TESTS
+        for name in PERFORMANCE_TESTS[:2]
     ]
     return [functional, *isolated]
 
@@ -64,6 +65,7 @@ def commands(channel: str, format_only: bool = False) -> list[list[str]]:
             [*cargo, "check", "--locked", "--all-targets"],
             [*cargo, "clippy", "--locked", "--all-targets", "--", "-D", "warnings"],
             *test_commands(channel),
+            [sys.executable, "scripts/performance.py"],
             [*cargo, "build", "--locked", "--release"],
         ]
     return checks

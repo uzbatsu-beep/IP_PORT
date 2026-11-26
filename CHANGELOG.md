@@ -9,6 +9,12 @@
 
 ## [Unreleased]
 
+### ENG-01.B — quality and performance pipeline
+- Resolve initial Cargo Deny font-license finding with a proposed exact-package allowance and distribution of original upstream notices; retain security checks and report dependency diagnostics in CI logs.
+- Add optimized eight-scenario performance QA with validated JSON and best-effort RSS; retain existing debug performance/stress gates.
+- Add pinned Cargo Audit/Deny, license/source policy, weekly Dependabot and mandatory Quality Gate.
+- Require successful exact-SHA main CI before release build; prepare Ruleset JSON without applying repository settings.
+
 ### ENG-01.A — engineering infrastructure
 - Pin development/release Rust 1.100.0; preserve MSRV 1.95.0 and Cargo.lock; use locked Cargo commands.
 - Add cross-platform preflight and regression tests; pin updated Node.js 24 Actions by verified upstream commit SHA.
