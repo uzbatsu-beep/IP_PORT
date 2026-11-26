@@ -3054,6 +3054,165 @@ mod tests {
         );
     }
 
+    // Sample working set outside the measured rendering interval. Unavailable is null.
+    fn process_rss_bytes() -> Option<u64> {
+        #[cfg(target_os = "linux")]
+        {
+            let status = std::fs::read_to_string("/proc/self/status").ok()?;
+            let line = status.lines().find(|line| line.starts_with("VmRSS:"))?;
+            let kib = line.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+            kib.checked_mul(1024)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let output = std::process::Command::new("ps")
+                .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let kib = String::from_utf8(output.stdout).ok()?.trim().parse::<u64>().ok()?;
+            kib.checked_mul(1024)
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let command = format!("(Get-Process -Id {}).WorkingSet64", std::process::id());
+            let output = std::process::Command::new("powershell.exe")
+                .args(["-NoProfile", "-NonInteractive", "-Command", &command])
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            String::from_utf8(output.stdout).ok()?.trim().parse().ok()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+        {
+            None
+        }
+    }
+
+    #[test]
+    fn performance_matrix_optimized() {
+        let mut reports = Vec::new();
+        let mut gate_passed = true;
+        let ms = |duration: Duration| duration.as_secs_f64() * 1000.0;
+        for count in [1_000_usize, 20_000, 50_000, 100_000] {
+            let mut app = App::default_state();
+            app.workspace.section = ui::navigation::Section::Devices;
+            let start = Instant::now();
+            for i in 0..count {
+                let ip = IpAddr::V4(Ipv4Addr::from(0x0a00_0001 + (i / 10) as u32));
+                let service = if i % 10 == 0 { "http" } else { "ssh" };
+                app.push_result(ScanResult::new(
+                    ip,
+                    (i % 10 + 80) as u16,
+                    service,
+                    Duration::from_micros((i % 5000 + 100) as u64),
+                ));
+            }
+            let ingest_ms = ms(start.elapsed());
+            assert_eq!(app.results.len(), count);
+            let start = Instant::now();
+            app.ensure_device_rows();
+            let projection_ms = ms(start.elapsed());
+            assert_eq!(app.device_rows().len(), count / 10);
+            let start = Instant::now();
+            app.sort_column = SortColumn::Latency;
+            app.sort_ascending = false;
+            app.ensure_results_view();
+            let sort_ms = ms(start.elapsed());
+            let start = Instant::now();
+            app.results_filter = "http".to_owned();
+            app.ensure_results_view();
+            let filter_ms = ms(start.elapsed());
+            assert_eq!(app.visible_indices().len(), count / 10);
+            app.results_filter.clear();
+            app.ensure_device_rows();
+            app.toggle_host(app.host_groups()[0].ip);
+            app.ensure_device_rows();
+            assert_eq!(app.device_rows().len(), count / 10 + 10);
+            for (mode, label) in [
+                (ResultsViewMode::GroupedByHost, "devices"),
+                (ResultsViewMode::Flat, "ports"),
+            ] {
+                app.view_mode = mode;
+                let ctx = egui::Context::default();
+                crate::ui::theme::apply(&ctx);
+                let rebuilds = app.view_rebuilds();
+                let mut warmup_ms = Vec::with_capacity(5);
+                let mut frame_ms = Vec::with_capacity(60);
+                let mut max_shapes = 0;
+                for frame in 0..65 {
+                    let start = Instant::now();
+                    let output = run_headless_frame(
+                        &mut app,
+                        &ctx,
+                        egui::vec2(1180.0, 760.0),
+                        1.0,
+                        vec![],
+                    );
+                    let elapsed = ms(start.elapsed());
+                    max_shapes = max_shapes.max(output.shapes.len());
+                    if frame < 5 {
+                        warmup_ms.push(elapsed);
+                    } else {
+                        frame_ms.push(elapsed);
+                    }
+                }
+                assert_eq!(app.view_rebuilds(), rebuilds);
+                assert!(max_shapes < 5000, "Virtualized draw must stay bounded");
+                let mean = frame_ms.iter().sum::<f64>() / frame_ms.len() as f64;
+                let mut sorted = frame_ms.clone();
+                sorted.sort_by(f64::total_cmp);
+                let p95 = sorted[57];
+                let within_target = mean < 16.0 && p95 < 25.0;
+                if count == 20_000 {
+                    gate_passed &= within_target;
+                }
+                reports.push(serde_json::json!({
+                    "endpoints": count,
+                    "hosts": count / 10,
+                    "view": label,
+                    "ingest_ms": ingest_ms,
+                    "projection_ms": projection_ms,
+                    "sort_ms": sort_ms,
+                    "filter_ms": filter_ms,
+                    "warmup_ms": warmup_ms,
+                    "frame_ms": frame_ms,
+                    "mean_ms": mean,
+                    "median_ms": (sorted[29] + sorted[30]) / 2.0,
+                    "p95_ms": p95,
+                    "p99_ms": sorted[59],
+                    "min_ms": sorted[0],
+                    "max_ms": sorted[59],
+                    "max_shapes": max_shapes,
+                    "rss_bytes": process_rss_bytes(),
+                    "within_target": within_target,
+                    "timing_gate_required": count == 20_000
+                }));
+            }
+        }
+        let report = serde_json::json!({
+            "schema_version": 1,
+            "profile": if cfg!(debug_assertions) { "debug" } else { "release" },
+            "os": std::env::consts::OS,
+            "arch": std::env::consts::ARCH,
+            "logical_cpus": std::thread::available_parallelism().ok().map(|n| n.get()),
+            "commit": std::env::var("GITHUB_SHA").ok(),
+            "runner_os": std::env::var("RUNNER_OS").ok(),
+            "gate_passed": gate_passed,
+            "scenarios": reports
+        });
+        if let Some(path) = std::env::var_os("IP_PORT_PERF_REPORT") {
+            let file = std::fs::File::create(path).expect("create performance report");
+            serde_json::to_writer_pretty(file, &report).expect("write performance report");
+        }
+        println!("{report}");
+        assert!(gate_passed, "20k optimized timing gate failed");
+    }
+
     #[test]
     fn combined_filters_are_and_and_preserve_raw_results() {
         let mut app = App::default_state();

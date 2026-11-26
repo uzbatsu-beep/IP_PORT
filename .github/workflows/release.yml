@@ -10,7 +10,24 @@ permissions:
   contents: read
 
 jobs:
+  release-ci-gate:
+    name: Verify exact release commit CI
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require successful main CI and Quality Gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/verify_release_ci.py
+
   build-release:
+    needs: release-ci-gate
     name: Build (${{ matrix.target }})
     if: startsWith(github.ref, 'refs/tags/v')
     strategy:

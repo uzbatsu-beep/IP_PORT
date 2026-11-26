@@ -11,18 +11,20 @@ class PreflightTests(unittest.TestCase):
         channel = preflight.pinned_channel()
         self.assertEqual(channel, "1.100.0")
         commands = preflight.commands(channel)
-        self.assertEqual(len(commands), 8)
+        self.assertEqual(len(commands), 9)
         self.assertEqual(commands[0], ["cargo", "+1.100.0", "fmt", "--all", "--check"])
         for command in commands[2:]:
-            self.assertEqual(command[:2], ["cargo", "+1.100.0"])
-            self.assertIn("--locked", command)
+            if command[0] == "cargo":
+                self.assertEqual(command[:2], ["cargo", "+1.100.0"])
+                self.assertIn("--locked", command)
+        self.assertIn([preflight.sys.executable, "scripts/performance.py"], commands)
         self.assertEqual(commands[3][-2:], ["-D", "warnings"])
         self.assertEqual(preflight.commands(channel, True), commands[:2])
 
     def test_isolated_performance_commands(self):
         checks = preflight.test_commands("1.100.0")
         self.assertEqual(len(checks), 3)
-        for name, command in zip(preflight.PERFORMANCE_TESTS, checks[1:]):
+        for name, command in zip(preflight.PERFORMANCE_TESTS[:2], checks[1:]):
             self.assertIn(name, checks[0])
             self.assertIn(name, command)
             self.assertIn("--exact", command)

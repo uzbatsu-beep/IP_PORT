@@ -36,3 +36,5 @@
 - [ ] Создан план для следующего исправления с приоритетами и критериями готовности
 
 **Ограничения цепочки поставки:** SHA-256 проверяет целостность относительно опубликованного манифеста, но не подлинность издателя. Текущий процесс не включает кодовую подпись Windows, нотариальное заверение macOS или attestations; при необходимости они должны быть добавлены отдельным проектным этапом.
+
+ENG-01.B: the release workflow requires the exact checked-out tag commit to have a successful latest CI push run on main and successful Quality Gate before any release build. Do not bypass the gate; wait for actual main CI success before creating an approved tag. Dependency audit and performance reports must be available.

@@ -88,3 +88,5 @@ cargo run --locked
 Не объединяйте PR автоматически: запросите согласование сопровождающего, проверьте всю CI-матрицу и конфликты. Для документационных изменений актуализируйте README/ARCHITECTURE/ROADMAP/CHANGELOG/SECURITY и связанные руководства.
 
 For CI-equivalent test execution use `python scripts/preflight.py --tests-only`: all functional tests followed by both isolated load tests. Test discovery fails closed if either benchmark is missing. See [TESTING.md](TESTING.md) for the distinction between cold-start and steady-state timing.
+
+ENG-01.B: full preflight includes optimized Performance QA. CI additionally runs mandatory Dependency Audit and Quality Gate; see [DEPENDENCIES.md](DEPENDENCIES.md) and [PERFORMANCE.md](PERFORMANCE.md).
