@@ -313,7 +313,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 
 fn summary(app: &App, ui: &mut Ui) {
     let lang = app.workspace.language;
-    components::section_heading(ui, lang.text("Last / active scan", "Последнее / активное сканирование"));
+    components::section_heading(
+        ui,
+        lang.text("Last / active scan", "Последнее / активное сканирование"),
+    );
     let (targets, ports, probes) = (app.target_count, app.port_count, app.total_probes);
 
     egui::Grid::new("scan_summary")
@@ -420,9 +423,7 @@ pub fn show_services(app: &mut App, ui: &mut Ui) {
             ui.horizontal(|ui| {
                 if ui
                     .small_button("Load file...")
-                    .on_hover_text(
-                        "Load an external nmap-services, /etc/services or IANA CSV file",
-                    )
+                    .on_hover_text("Load an external nmap-services, /etc/services or IANA CSV file")
                     .clicked()
                     && let Some(path) = rfd::FileDialog::new()
                         .add_filter("Services DB", &["txt", "services", "csv", "*"])
@@ -436,10 +437,7 @@ pub fn show_services(app: &mut App, ui: &mut Ui) {
                             );
                         }
                         Err(err) => {
-                            app.set_status(
-                                StatusLevel::Error,
-                                format!("Services DB error: {err}"),
-                            );
+                            app.set_status(StatusLevel::Error, format!("Services DB error: {err}"));
                         }
                     }
                 }

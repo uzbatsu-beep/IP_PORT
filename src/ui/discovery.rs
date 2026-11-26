@@ -42,31 +42,45 @@ pub fn show_mode(app: &mut App, ui: &mut Ui, lang: Language) {
             ui.selectable_value(&mut app.workspace.discovery.mode, mode, name);
         }
     });
-    ui.label(RichText::new(lang.text(
-        "Switching modes does not change scan inputs.",
-        "Смена режима не изменяет параметры сканирования.",
-    )).small().weak());
+    ui.label(
+        RichText::new(lang.text(
+            "Switching modes does not change scan inputs.",
+            "Смена режима не изменяет параметры сканирования.",
+        ))
+        .small()
+        .weak(),
+    );
 }
 
 pub fn show_presets(app: &mut App, ui: &mut Ui, lang: Language) {
     match app.workspace.discovery.mode {
         Mode::General => {
             ui.horizontal_wrapped(|ui| {
-                let append = ui.input(|i| i.modifiers.command || i.modifiers.ctrl || i.modifiers.shift);
+                let append =
+                    ui.input(|i| i.modifiers.command || i.modifiers.ctrl || i.modifiers.shift);
                 for preset in presets::presets_for_protocol(app.protocol) {
                     let active = presets::ports_input_matches(&app.ports_input, preset.ports);
-                    if ui.add(egui::Button::new(preset.name).selected(active))
-                        .on_hover_text(format!("{}\n{}\nCtrl/Shift: append", preset.description, preset.ports))
+                    if ui
+                        .add(egui::Button::new(preset.name).selected(active))
+                        .on_hover_text(format!(
+                            "{}\n{}\nCtrl/Shift: append",
+                            preset.description, preset.ports
+                        ))
                         .clicked()
                     {
-                        app.ports_input = presets::apply_preset(&app.ports_input, preset.ports, append);
+                        app.ports_input =
+                            presets::apply_preset(&app.ports_input, preset.ports, append);
                     }
                 }
             });
         }
         Mode::Industrial => industrial(app, ui, lang),
         Mode::Custom => {
-            ui.label(RichText::new(lang.text("Manual port list", "Ручной список портов")).small().weak());
+            ui.label(
+                RichText::new(lang.text("Manual port list", "Ручной список портов"))
+                    .small()
+                    .weak(),
+            );
         }
     }
 }
@@ -78,8 +92,16 @@ fn industrial(app: &mut App, ui: &mut Ui, lang: Language) {
     };
     let state = &mut app.workspace.discovery;
     ui.horizontal_wrapped(|ui| {
-        ui.selectable_value(&mut state.by_protocol, false, lang.text("Vendor", "Производитель"));
-        ui.selectable_value(&mut state.by_protocol, true, lang.text("Protocol", "Протокол"));
+        ui.selectable_value(
+            &mut state.by_protocol,
+            false,
+            lang.text("Vendor", "Производитель"),
+        );
+        ui.selectable_value(
+            &mut state.by_protocol,
+            true,
+            lang.text("Protocol", "Протокол"),
+        );
     });
     let selection = if state.by_protocol {
         if state.protocol_group.is_empty() {
@@ -112,7 +134,11 @@ fn industrial(app: &mut App, ui: &mut Ui, lang: Language) {
         }
         let all = lang.text("All catalog families", "Все семейства каталога");
         egui::ComboBox::from_id_salt("industrial_family")
-            .selected_text(if state.family.is_empty() { all } else { &state.family })
+            .selected_text(if state.family.is_empty() {
+                all
+            } else {
+                &state.family
+            })
             .width(ui.available_width())
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut state.family, String::new(), all);
@@ -134,38 +160,62 @@ fn industrial(app: &mut App, ui: &mut Ui, lang: Language) {
         }
     };
     if candidates.ports.is_empty() {
-        ui.label(lang.text("No reviewed candidates for this selection/transport.", "Нет проверенных портов-кандидатов для выбранного семейства/транспорта."));
+        ui.label(lang.text(
+            "No reviewed candidates for this selection/transport.",
+            "Нет проверенных портов-кандидатов для выбранного семейства/транспорта.",
+        ));
         return;
     }
     let ports = candidates.port_text();
-    ui.label(format!("{}: {ports}", lang.text("Port candidates", "Порты-кандидаты")));
-    ui.label(RichText::new(lang.text(
-        "Optional services; an open port does not confirm the protocol or model.",
-        "Сервисы могут быть отключены; открытый порт не подтверждает протокол или модель.",
-    )).small().weak());
+    ui.label(format!(
+        "{}: {ports}",
+        lang.text("Port candidates", "Порты-кандидаты")
+    ));
+    ui.label(
+        RichText::new(lang.text(
+            "Optional services; an open port does not confirm the protocol or model.",
+            "Сервисы могут быть отключены; открытый порт не подтверждает протокол или модель.",
+        ))
+        .small()
+        .weak(),
+    );
     if app.protocol == ScanProtocol::Udp {
         ui.label(RichText::new(lang.text(
             "Generic UDP probe is not protocol discovery. Silence is inconclusive.",
             "Универсальный UDP-запрос не идентифицирует протокол. Отсутствие ответа ничего не доказывает.",
         )).color(super::theme::warning(ui)).small());
     }
-    egui::CollapsingHeader::new(lang.text("Evidence / sources", "Источники и ограничения"))
-        .show(ui, |ui| {
+    egui::CollapsingHeader::new(lang.text("Evidence / sources", "Источники и ограничения")).show(
+        ui,
+        |ui| {
             for entry in candidates.entries {
                 ui.push_id(&entry.id, |ui| {
-                    ui.label(format!("{} · {} · {}", entry.family, entry.purpose, entry.ports));
+                    ui.label(format!(
+                        "{} · {} · {}",
+                        entry.family, entry.purpose, entry.ports
+                    ));
                     ui.label(RichText::new(&entry.notes).small().weak());
                     ui.hyperlink_to(lang.text("Source", "Источник"), &entry.source);
                 });
             }
-        });
+        },
+    );
     ui.horizontal_wrapped(|ui| {
-        if ui.button(lang.text("Replace ports", "Заменить порты")).clicked() {
+        if ui
+            .button(lang.text("Replace ports", "Заменить порты"))
+            .clicked()
+        {
             app.ports_input = ports.clone();
         }
         let can_append = crate::scanner::targets::parse_ports(&app.ports_input).is_ok()
             || app.ports_input.trim().is_empty();
-        if ui.add_enabled(can_append, egui::Button::new(lang.text("Append", "Добавить"))).clicked() {
+        if ui
+            .add_enabled(
+                can_append,
+                egui::Button::new(lang.text("Append", "Добавить")),
+            )
+            .clicked()
+        {
             app.ports_input = presets::apply_preset(&app.ports_input, &ports, true);
         }
     });
@@ -178,29 +228,45 @@ fn timeout_estimate_seconds(scope: ScopePreview, concurrency: usize, timeout_ms:
 pub fn show_scope(app: &App, preview: &Result<ScopePreview, String>, ui: &mut Ui, lang: Language) {
     super::components::section_heading(ui, lang.text("Scan scope", "Область сканирования"));
     if app.is_running() {
-        ui.label(lang.text("Active scan — actual counters below", "Активное сканирование — фактические счётчики ниже"));
+        ui.label(lang.text(
+            "Active scan — actual counters below",
+            "Активное сканирование — фактические счётчики ниже",
+        ));
         return;
     }
     match preview {
         Ok(scope) => {
-            egui::Grid::new("discovery_scope").num_columns(2).show(ui, |ui| {
-                for (name, count) in [
-                    (lang.text("Targets", "Цели"), scope.targets),
-                    (lang.text("Hostnames", "Имена узлов"), scope.hostnames),
-                    (lang.text("Excluded IPs", "Исключённые IP"), scope.excluded),
-                    (lang.text("Ports", "Порты"), scope.ports),
-                    (lang.text("Planned probes", "План проверок"), scope.probes),
-                ] {
-                    super::components::metric_row(ui, name, count, false);
-                }
-            });
-            ui.label(format!("{}: {:.1} s", lang.text("Timeout-only estimate", "Оценка по тайм-аутам, с"), timeout_estimate_seconds(*scope, app.concurrency, app.timeout_ms)));
-            ui.label(RichText::new(lang.text(
-                "Approximate; excludes DNS, banner reads and scheduling overhead.",
-                "Приблизительно; без DNS, баннеров и накладных расходов планирования.",
-            )).small().weak());
+            egui::Grid::new("discovery_scope")
+                .num_columns(2)
+                .show(ui, |ui| {
+                    for (name, count) in [
+                        (lang.text("Targets", "Цели"), scope.targets),
+                        (lang.text("Hostnames", "Имена узлов"), scope.hostnames),
+                        (lang.text("Excluded IPs", "Исключённые IP"), scope.excluded),
+                        (lang.text("Ports", "Порты"), scope.ports),
+                        (lang.text("Planned probes", "План проверок"), scope.probes),
+                    ] {
+                        super::components::metric_row(ui, name, count, false);
+                    }
+                });
+            ui.label(format!(
+                "{}: {:.1} s",
+                lang.text("Timeout-only estimate", "Оценка по тайм-аутам, с"),
+                timeout_estimate_seconds(*scope, app.concurrency, app.timeout_ms)
+            ));
+            ui.label(
+                RichText::new(lang.text(
+                    "Approximate; excludes DNS, banner reads and scheduling overhead.",
+                    "Приблизительно; без DNS, баннеров и накладных расходов планирования.",
+                ))
+                .small()
+                .weak(),
+            );
             if scope.hostnames > 0 {
-                ui.label(lang.text("DNS resolution may change the final scope.", "DNS-разрешение может изменить итоговый объём."));
+                ui.label(lang.text(
+                    "DNS resolution may change the final scope.",
+                    "DNS-разрешение может изменить итоговый объём.",
+                ));
             }
         }
         Err(error) => {
