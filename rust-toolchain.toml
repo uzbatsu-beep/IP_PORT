@@ -1,0 +1,5 @@
+# Pinned development/release toolchain; Cargo.toml declares the independent MSRV.
+[toolchain]
+channel = "1.100.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

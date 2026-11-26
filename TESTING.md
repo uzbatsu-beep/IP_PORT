@@ -49,3 +49,8 @@ cargo build --release
 - В `main` нет одноразовых release-скриптов, открытых серьёзных дефектов и непроверенных изменений.
 - GitHub Release содержит четыре архива и полный `SHA256SUMS.txt`, хэши проверены; [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 - Приёмка в реальном OT-сегменте проводится **только после разрешения владельца сети**, отдельно от лабораторной проверки.
+
+
+## ENG-01.A
+
+Use the pinned Rust 1.100.0 toolchain and `--locked` for Cargo check/clippy/test/build. Run the cross-platform preflight in [ENGINEERING.md](ENGINEERING.md). After repeated Windows failures, 20k performance and 100k stress tests are executed sequentially in separate processes via `python scripts/preflight.py --tests-only`; exact test discovery is required. The 20k test logs five fixed warm-up frames (including cold start) separately, then measures all 60 steady-state frames with mean <16 ms and P95 <25 ms unchanged. Cold-start times are not subject to those steady-state gates. The 100k functional assertions are unchanged. Optimized-profile benchmarking, more scenarios and JSON metrics remain ENG-01.B. The MSRV check remains an independent locked build on 1.95.0.

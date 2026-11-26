@@ -22,15 +22,15 @@ jobs:
     name: Formatting
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          components: rustfmt
-      - name: Check code formatting
-        run: cargo fmt --check
-
-      - name: Check repository Markdown links
-        run: python3 scripts/check_docs.py
+          persist-credentials: false
+      - name: Install pinned toolchain
+        run: rustup show
+      - name: Check code formatting and repository Markdown links
+        run: python3 scripts/preflight.py --format-only
+      - name: Test preflight command selection and failure propagation
+        run: python3 -m unittest discover -s scripts -p 'test_preflight.py'
 
   check:
     name: Test & Clippy (${{ matrix.os }})
@@ -47,7 +47,9 @@ jobs:
             target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Linux system dependencies
         if: matrix.os == 'ubuntu-latest'
@@ -63,26 +65,28 @@ jobs:
             libxi-dev \
             libxrandr-dev
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-          components: clippy
+      - name: Install pinned toolchain and target
+        run: |
+          rustup show
+          rustup target add ${{ matrix.target }}
+          rustc --version --verbose
+          cargo --version
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: ${{ matrix.target }}
 
       - name: Lint with Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
-      - name: Run unit and integration tests
-        run: cargo test --all-targets
+      - name: Run functional and isolated performance tests
+        run: python scripts/preflight.py --tests-only
 
       - name: Build optimized release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --locked --release --target ${{ matrix.target }}
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ip_port_scanner-${{ matrix.target }}
           path: |
@@ -95,7 +99,9 @@ jobs:
     name: Minimum Supported Rust Version (MSRV 1.95.0)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install Linux dependencies
         run: |
@@ -110,9 +116,10 @@ jobs:
             libxi-dev \
             libxrandr-dev
 
-      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Install minimum supported toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Check compilation on MSRV
-        run: cargo check --all-targets
+        run: cargo +1.95.0 check --locked --all-targets

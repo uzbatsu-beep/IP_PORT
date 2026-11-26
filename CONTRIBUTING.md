@@ -7,7 +7,8 @@
 ## 1. Начало работы
 
 ### Требования к окружению
-- **Rust:** версия `1.95.0` или новее (редакция `edition = "2024"`).
+- **Rust:** rustup; разработка и релиз на `1.100.0` из `rust-toolchain.toml`, MSRV `1.95.0`, edition 2024.
+- **Python:** 3.10+ для preflight и проверки документации.
 - **Cargo:** встроенный менеджер пакетов.
 - **Git**
 
@@ -15,26 +16,28 @@
 ```bash
 git clone https://github.com/uzbatsu-beep/IP_PORT.git
 cd IP_PORT
-cargo run
+cargo run --locked
 ```
 
 ---
 
 ## 2. Стандарты качества и проверки
 
-Перед отправкой любого изменения убедитесь, что все автоматические проверки проходят локально:
+Перед отправкой изменений выполните `cargo fmt --all`, затем `powershell -File scripts/preflight.ps1` (Windows) или `bash scripts/preflight.sh` (Linux/macOS). Можно использовать `python3 scripts/preflight.py`. Preflight выполняет format/docs/check/clippy/test/release и останавливается при первой ошибке. См. [ENGINEERING.md](ENGINEERING.md) и [AGENTS.md](AGENTS.md).
+
+Отдельные команды:
 
 1. **Форматирование кода:**
    ```bash
-   cargo fmt --check
+   cargo fmt --all --check
    ```
 2. **Статический анализ (Clippy):** Код должен компилироваться без единого предупреждения:
    ```bash
-   cargo clippy --all-targets -- -D warnings
+   cargo clippy --locked --all-targets -- -D warnings
    ```
 3. **Модульные и интеграционные тесты:**
    ```bash
-   cargo test --all-targets
+   cargo test --locked --all-targets
    ```
 
 4. **Проверка всей Markdown-документации (локальные ссылки):**
@@ -42,7 +45,7 @@ cargo run
    python3 scripts/check_docs.py
    ```
 
-Все четыре команды должны завершаться с кодом `0`. CI дополнительно проверяет `Rust 1.95` (MSRV) и release-сборки Windows/Linux/macOS. Тесты GUI/сетевой логики в CI не заменяют ручную проверку Windows в тестовом сегменте.
+Также выполняются `cargo check --locked --all-targets` и `cargo build --locked --release`. Все команды должны завершаться с кодом `0`. CI дополнительно проверяет `Rust 1.95` (MSRV) и release-сборки Windows/Linux/macOS. Тесты GUI/сетевой логики в CI не заменяют ручную проверку Windows в тестовом сегменте.
 
 ---
 
@@ -83,3 +86,5 @@ cargo run
 Релизы создаются **из проверенного коммита по тегу `vX.Y.Z`**, версия в `Cargo.toml` должна совпадать с тегом. Workflow проверяет все четыре платформенных архива до публикации SHA-256. Одноразовые workflow и временные файлы подготовки не должны попадать в `main`. Проверяйте [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) до любого выпуска.
 
 Не объединяйте PR автоматически: запросите согласование сопровождающего, проверьте всю CI-матрицу и конфликты. Для документационных изменений актуализируйте README/ARCHITECTURE/ROADMAP/CHANGELOG/SECURITY и связанные руководства.
+
+For CI-equivalent test execution use `python scripts/preflight.py --tests-only`: all functional tests followed by both isolated load tests. Test discovery fails closed if either benchmark is missing. See [TESTING.md](TESTING.md) for the distinction between cold-start and steady-state timing.

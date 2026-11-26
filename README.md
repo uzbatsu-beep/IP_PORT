@@ -167,3 +167,6 @@ Upcoming v0.5.0 (development): Discovery adds General / Industrial / Custom, cur
 
 
 UI-03.5 (development): virtualized Devices/Ports, explicit service evidence, combined filters and stable selection; industrial catalog expanded to 56 reference entries. Full factory/model coverage is not claimed.
+
+
+Development uses Rust 1.100.0 pinned by rust-toolchain.toml, independent MSRV 1.95.0 and locked Cargo builds. See [ENGINEERING.md](ENGINEERING.md), [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) for preflight and engineering policy.

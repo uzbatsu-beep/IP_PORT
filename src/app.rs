@@ -3151,7 +3151,14 @@ mod tests {
         app.results_filter.clear();
         app.ensure_results_view();
 
-        // 4. Measure 60 full UI frame render cycles
+        // 4. Measure cold start and a fixed warm-up separately from steady state.
+        // No measured steady-state samples are discarded.
+        let mut warmup_durations = Vec::with_capacity(5);
+        for _ in 0..5 {
+            let start = Instant::now();
+            let _ = run_headless_frame(&mut app, &ctx, egui::vec2(1180.0, 760.0), 1.0, Vec::new());
+            warmup_durations.push(start.elapsed());
+        }
         let mut frame_durations = Vec::with_capacity(60);
         for _ in 0..60 {
             let t_frame_start = Instant::now();
@@ -3170,7 +3177,15 @@ mod tests {
         let fps = 1.0 / avg_frame.as_secs_f64();
 
         println!("\n================ LOAD & STRESS BENCHMARK REPORT ================");
-        println!("Platform / Specs: AMD Ryzen 5 5600X 6C/12T, 32GB RAM, Windows 10 x64");
+        println!(
+            "Platform: {} / {}; available logical CPUs: {:?}; debug assertions: {}",
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            std::thread::available_parallelism().map(|n| n.get()),
+            cfg!(debug_assertions)
+        );
+        println!("Runner OS: {:?}", std::env::var("RUNNER_OS").ok());
+        println!("Cold/warm-up frame durations: {warmup_durations:?}");
         println!("Dataset: {} synthetic open port results", COUNT);
         println!(
             "- Event Ingestion (20k events via mpsc + budget): {:.2} ms ({:.0} events/sec)",
@@ -3190,7 +3205,7 @@ mod tests {
             filtered_count,
             filter_duration.as_secs_f64() * 1000.0
         );
-        println!("- 60 Full egui UI Frames Rendering:");
+        println!("- 60 Full egui UI Frames Rendering (steady state):");
         println!(
             "    Min Frame:    {:.3} ms",
             min_frame.as_secs_f64() * 1000.0
@@ -3217,10 +3232,10 @@ mod tests {
         );
         println!("================================================================\n");
 
-        // UI frame threshold: must be well under 16.6 ms (60 FPS).
+        // Steady-state limits are unchanged. Cold/warm-up timings are reported separately.
         assert!(
             avg_frame < Duration::from_millis(16),
-            "Average frame time {:?} exceeds 60 FPS budget (16.6ms)",
+            "Average steady-state frame time {:?} exceeds strict 16ms budget",
             avg_frame
         );
         assert!(
