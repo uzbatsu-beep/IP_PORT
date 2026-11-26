@@ -203,3 +203,7 @@ cargo build --locked --release
 ENG-01.A: release builds use the exact Rust version in rust-toolchain.toml and `--locked`; see [ENGINEERING.md](ENGINEERING.md). This locks the Rust/dependency inputs, not the entire OS/linker environment.
 
 Release and CI artifacts include [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the original bundled font license notices. CI artifacts may retain target/ paths because the upload root is now the repository root; locate ip_port_scanner.exe within the ZIP. No font binaries are added.
+
+## Windows-only preview releases
+
+The proposed [Windows Preview Release workflow](.github/workflows/windows-preview.yml) is manually dispatched on `main`. It checks latest exact-SHA main CI and the Windows job plus Quality Gate, builds the pinned locked x64 binary, packages the root documentation and notices, verifies ZIP and SHA-256, and publishes a prerelease under `preview-windows-vX.Y.Z-N`. It refuses existing tag names. This does not replace the stable four-platform release, which still requires cross-platform acceptance. Manual equipment testing remains pending. The stable Latest badge will remain on the last stable release.

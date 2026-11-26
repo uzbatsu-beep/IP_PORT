@@ -40,3 +40,10 @@
 ENG-01.B: the release workflow requires the exact checked-out tag commit to have a successful latest CI push run on main and successful Quality Gate before any release build. Do not bypass the gate; wait for actual main CI success before creating an approved tag. Dependency audit and performance reports must be available.
 
 - [ ] All four packages contain THIRD_PARTY_NOTICES.md and the original font notices under third-party/epaint_default_fonts; verify the bundled dependency version and remaining third-party license obligations before release.
+
+## Windows Preview (proposed separate prerelease channel)
+
+- [ ] Merge and verify the Windows Preview workflow before use. On Actions → Windows Preview Release, select `main` and a new preview number.
+- [ ] Latest exact-SHA main CI, Windows QA and Quality Gate must pass both before build and before publication.
+- [ ] Check the locked Windows x64 ZIP, license notices and SHA256SUMS.txt. A new `preview-windows-vX.Y.Z-N` tag is created only on the tested SHA; no existing tags may be reused.
+- [ ] Mark as prerelease, not Latest. Manual Windows/equipment QA and Linux/macOS remain pending; disclose in notes. Stable `vX.Y.Z` policy is unchanged.
