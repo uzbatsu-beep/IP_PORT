@@ -49,8 +49,6 @@ impl ResultRow {
             || contains_ascii_case_insensitive(self.protocol_text, query_lower)
             || contains_ascii_case_insensitive(self.state_text, query_lower)
             || contains_ascii_case_insensitive(&self.raw.service, query_lower)
-            || contains_ascii_case_insensitive(self.protocol_text, query_lower)
-            || contains_ascii_case_insensitive(self.state_text, query_lower)
             || self
                 .raw
                 .banner

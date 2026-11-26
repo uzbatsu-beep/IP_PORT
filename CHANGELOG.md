@@ -9,6 +9,11 @@
 
 ## [Unreleased]
 
+### ENG-01.C2 — Managed ResultsProjection
+- Extract filtering, sorting, grouping and cached virtualized row projections from App; stage-specific invalidation and store/metadata revisions.
+- Preserve stable endpoint ordering, host expansion, selection and current UX; remove duplicate ASCII search predicates.
+- Add independent equivalence and cache regressions; report projection rebuild counters in optimized QA.
+
 ### Dependency maintenance — DNS resolver
 - Adapt dns-lookup 4.0.2 typed resolver errors; preserve explicit absent name vs resolver failures, bounded native-code diagnostics and background lookup. Add deterministic Windows and platform-independent regressions.
 

@@ -313,7 +313,7 @@ Shared components, semantic status colors, reusable panel surfaces and table met
 | ENG-01.A | Development infrastructure and pinned toolchain | Merged; CI passed |
 | ENG-01.B | Quality & Performance Pipeline | Merged; CI passed |
 | ENG-01.C1 | Encapsulated ResultsStore, revisions, stable EndpointId | Merged; Windows-first CI passed |
-| ENG-01.C2 | ResultsProjection extraction, preserve algorithms | Approved; after C1 |
+| ENG-01.C2 | Managed ResultsProjection, revision cache, metrics and equivalence | In PR; Windows-first CI pending |
 | ENG-01.C3 | Typed SelectionState | Approved; after C2 |
 | ENG-01.C4 | Integration and live performance QA | Approved; after C3 |
 | ENG-01.D | Engineering acceptance | Approved; after C |

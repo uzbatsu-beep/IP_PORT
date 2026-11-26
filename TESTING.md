@@ -57,3 +57,6 @@ Use the pinned Rust 1.100.0 toolchain and `--locked` for Cargo check/clippy/test
 
 
 ENG-01.B: the existing isolated debug tests remain unchanged; optimized matrix is excluded from functional test command and executed explicitly by scripts/performance.py with release profile. Exact test discovery and report validation prevent false positives. See [PERFORMANCE.md](PERFORMANCE.md). Engineering scripts have independent unittest coverage.
+
+
+ENG-01.C2 adds headless projection equivalence against the previous full-rebuild algorithm across sort/filter/expansion transitions, stage-specific invalidation, and metadata update tests. The existing combined filters, host grouping, RTT, 100k and optimized scenarios remain mandatory. Steady-state optimized frames must not change any projection counter. See [PERFORMANCE.md](PERFORMANCE.md).

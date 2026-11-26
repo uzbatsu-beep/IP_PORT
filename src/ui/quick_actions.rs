@@ -233,7 +233,7 @@ pub fn show_row_context_menu(app: &mut App, entry: &ResultRow, ui: &mut egui::Ui
         .button(format!("🔍 Filter by this IP ({})", entry.ip_text))
         .clicked()
     {
-        app.results_filter = entry.ip_text.clone();
+        app.projection.settings.results_filter = entry.ip_text.clone();
         ui.close();
     }
 
@@ -321,7 +321,7 @@ pub fn show_inspector_toolbar(app: &mut App, entry_idx: usize, ui: &mut Ui) {
                 .on_hover_text("Filter results table to only show ports for this host")
                 .clicked()
             {
-                app.results_filter = entry.ip_text.clone();
+                app.projection.settings.results_filter = entry.ip_text.clone();
             }
 
             if ui
