@@ -2,6 +2,7 @@
 """Require latest CI push run on main for the exact release commit."""
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -29,7 +30,14 @@ def require_gate(jobs: list[dict], name: str = "Quality Gate") -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--windows-preview", action="store_true",
+                        help="Manual Windows-only prerelease; not the stable release gate")
+    args = parser.parse_args()
     try:
+        if args.windows_preview and (os.environ.get("GITHUB_REF") != "refs/heads/main"
+                                     or os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"):
+            raise ValueError("Windows preview requires manual dispatch on main")
         sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
         repo = os.environ["GITHUB_REPOSITORY"]
         if not re.fullmatch(r"[0-9a-f]{40}", sha) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
@@ -50,6 +58,10 @@ def main() -> int:
         if jobs["total_count"] > len(jobs["jobs"]):
             raise ValueError("Incomplete job listing")
         require_gate(jobs["jobs"])
+        if args.windows_preview:
+            require_gate(jobs["jobs"], "Test & Clippy (windows-latest)")
+            print(f"Windows preview SHA {sha}: main CI {run['id']} and Windows QA passed")
+            return 0
         cross_query = urlencode({"head_sha": sha, "branch": "main", "event": "workflow_dispatch", "per_page": 100})
         cross = select_run(get("actions/workflows/cross-platform.yml/runs?" + cross_query)["workflow_runs"], sha, "workflow_dispatch")
         cross_jobs = get(f"actions/runs/{cross['id']}/jobs?filter=latest&per_page=100")

@@ -33,6 +33,13 @@ class ReleaseGateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             select_run([run(), run(id=2, conclusion="failure")], SHA)
 
+    def test_windows_preview_requires_windows_job(self):
+        jobs = [{"name": "Quality Gate", "status": "completed", "conclusion": "success"}]
+        with self.assertRaises(ValueError):
+            require_gate(jobs, "Test & Clippy (windows-latest)")
+        jobs.append({"name": "Test & Clippy (windows-latest)", "status": "completed", "conclusion": "success"})
+        require_gate(jobs, "Test & Clippy (windows-latest)")
+
     def test_missing_skipped_or_failed_gate(self):
         for jobs in ([], [{"name": "Quality Gate", "status": "completed", "conclusion": "skipped"}],
                      [{"name": "Quality Gate", "status": "completed", "conclusion": "failure"}]):
