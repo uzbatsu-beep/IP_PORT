@@ -1,8 +1,8 @@
 use egui::{Color32, RichText, Ui};
 
 use crate::app::App;
-use crate::ui::components;
 use crate::scanner::{PortState, ScanResult};
+use crate::ui::components;
 
 /// Статистические метрики задержки (RTT) для набора открытых портов.
 #[derive(Clone, Debug, PartialEq)]
