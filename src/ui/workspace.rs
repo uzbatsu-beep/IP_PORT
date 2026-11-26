@@ -186,11 +186,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 }
 
 fn inspector(app: &App, ui: &mut Ui, language: Language) {
-    components::section_heading(
-        ui,
-        language.text("Device inspector", "Карточка устройства"),
-    );
-    let Some(index) = app.selected_result.filter(|&index| index < app.results.len()) else {
+    components::section_heading(ui, language.text("Device inspector", "Карточка устройства"));
+    let Some(index) = app
+        .selected_result
+        .filter(|&index| index < app.results.len())
+    else {
         ui.label(
             RichText::new(language.text(
                 "Select a result to inspect its observed host.",
@@ -235,19 +235,14 @@ fn inspector(app: &App, ui: &mut Ui, language: Language) {
     if info.is_some_and(|i| i.neighbor_ambiguous) {
         ui.label(components::semantic_text(
             ui,
-            language.text(
-                "Ambiguous neighbor records",
-                "Неоднозначные записи соседей",
-            ),
+            language.text("Ambiguous neighbor records", "Неоднозначные записи соседей"),
             components::Tone::Warning,
         ));
     }
     components::section_divider(ui);
-    ui.label(
-        RichText::new(language.text("Selected endpoint", "Выбранный порт")).strong(),
-    );
+    ui.label(RichText::new(language.text("Selected endpoint", "Выбранный порт")).strong());
     ui.label(format!("{}/{}", row.port_text, row.protocol_text));
-    ui.label(&row.state_text);
+    ui.label(row.state_text);
     ui.label(&row.raw.service);
     ui.label(&row.latency_text);
     ui.label(
