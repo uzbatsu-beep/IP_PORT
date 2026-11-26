@@ -277,3 +277,8 @@ cargo run
 при доступности IPv6, `::1`. Проверяйте запуск, прогресс, остановку, повторный запуск, фильтр,
 сортировку и экспорт. GUI и работа на каждой платформе требуют отдельной ручной проверки;
 успешные модульные тесты сами по себе её не заменяют.
+
+
+## UI-03.1 — Workspace shell
+
+The egui composition moves to `src/ui/workspace.rs`. App retains network task lifecycle, event handling, keyboard shortcuts, results and profiles. Workspace owns navigation and shell language. It renders header, status strip, navigation, existing context controls, center results and a right observed-host inspector. At narrow widths the inspector is a collapsible region above results. The shell uses current result rows and cached host metadata only; it does not introduce Asset identity, active protocol discovery or storage. See [UI_WORKSPACE.md](UI_WORKSPACE.md).

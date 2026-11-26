@@ -299,3 +299,19 @@ Implementation scope: independent Light/Dark and eight accent palettes, automati
 ## UI-02 — Design system
 
 Shared components, semantic status colors, reusable panel surfaces and table metrics precede UI-03 (workspace redesign). CI must validate the new component and full-view headless tests. Manual Windows visual acceptance remains required before release. Industrial device identification and scanner behavior are unchanged.
+
+
+## UI-03 — Engineering Workspace (approved 2026-11-26)
+
+| Stage | Scope | State |
+| --- | --- | --- |
+| UI-03.1 | Workspace shell, real navigation entry points, existing grouped host view on startup, observed-host inspector, shell RU/EN | Implementation in PR; CI and manual acceptance pending |
+| UI-03.2 | Navigation and context state | Planned |
+| UI-03.3 | Global toolbar | Planned |
+| UI-03.4 | Discovery panel and settings localization | Planned |
+| UI-03.5 | Device/port results, virtualized device presentation | Planned |
+| UI-03.6 | Universal inspector and evidence sections | Planned |
+| UI-03.7 | Complete status bar and RU/EN localization | Planned |
+| UI-03.8 | Integration and Windows acceptance | Planned |
+
+See [UI_WORKSPACE.md](UI_WORKSPACE.md). UI-01 and UI-02 are merged; manual Windows acceptance is still a release gate. Existing grouped-by-host view is transitional; it is not a persistent Asset Store. No new protocol adapters or database are authorized here.
