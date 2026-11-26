@@ -1,8 +1,7 @@
 use egui::{RichText, Ui};
 
-use crate::app::{App, ScopePreview, StatusLevel};
-use crate::scanner::presets;
-use crate::ui::{components, theme};
+use crate::app::{App, StatusLevel};
+use crate::ui::{components, discovery, theme};
 
 pub fn show_appearance(app: &mut App, ui: &mut Ui) {
     egui::CollapsingHeader::new("Appearance")
@@ -38,13 +37,15 @@ pub fn show_appearance(app: &mut App, ui: &mut Ui) {
 
 pub fn show(app: &mut App, ui: &mut Ui) {
     ui.add_space(4.0);
-    components::section_heading(ui, "IP / PORT Scanner");
-    ui.label(RichText::new("Async TCP & UDP port scanner").weak());
+    let lang = app.workspace.language;
+    components::section_heading(ui, lang.text("Discovery", "Обнаружение"));
     ui.add_space(12.0);
 
     let running = app.is_running();
     ui.add_enabled_ui(!running, |ui| {
-        ui.label(RichText::new("Protocol").strong());
+        discovery::show_mode(app, ui, lang);
+        components::section_divider(ui);
+        ui.label(RichText::new(lang.text("Transport", "Транспорт")).strong());
         ui.horizontal(|ui| {
             let tcp_active = app.protocol == crate::scanner::ScanProtocol::Tcp;
             let udp_active = app.protocol == crate::scanner::ScanProtocol::Udp;
@@ -67,64 +68,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 .small(),
             );
         }
-
-        ui.add_space(8.0);
-        ui.label(RichText::new("Targets").strong());
-        ui.add(
-            egui::TextEdit::multiline(&mut app.targets_input)
-                .desired_rows(6)
-                .desired_width(f32::INFINITY)
-                .hint_text("10.0.0.1\n192.168.1.0/24\n10.0.0.1-10.0.0.50"),
-        )
-        .on_hover_text(
-            "One target per line: IPv4/IPv6 address, CIDR subnet or IPv4 range (# comments ignored)",
-        );
-
-        ui.add_space(8.0);
-        egui::CollapsingHeader::new(RichText::new("Exclude targets (safety scope)").strong())
-            .default_open(false)
-            .show(ui, |ui| {
-                ui.add(
-                    egui::TextEdit::multiline(&mut app.exclusions_input)
-                        .desired_rows(3)
-                        .desired_width(f32::INFINITY)
-                        .hint_text("192.168.1.1, 192.168.1.200-254\n10.0.0.0/24\n2001:db8::/64"),
-                )
-                .on_hover_text(
-                    "Excluded IPs, ranges and CIDRs are never probed. Also applies after hostname DNS resolution. Comments start with #.",
-                );
-                ui.label(
-                    RichText::new("Invalid exclusions block scanning. DNS target exclusions apply after A/AAAA lookup.")
-                        .small()
-                        .weak(),
-                );
-            });
-
-        ui.add_space(8.0);
-        ui.label(RichText::new("Ports").strong());
-        ui.add(
-            egui::TextEdit::singleline(&mut app.ports_input)
-                .desired_width(f32::INFINITY)
-                .hint_text("22,80,443 or 1-1024"),
-        );
-
-        ui.horizontal_wrapped(|ui| {
-            let active_presets = presets::presets_for_protocol(app.protocol);
-            let append_mode = ui.input(|i| i.modifiers.command || i.modifiers.ctrl || i.modifiers.shift);
-            for preset in active_presets {
-                let active = presets::ports_input_matches(&app.ports_input, preset.ports);
-                let button = egui::Button::new(preset.name).selected(active);
-                let tooltip = format!(
-                    "{}\n\nPorts ({}):\n{}\n\nTip: Hold Ctrl or Shift to append without replacing",
-                    preset.description,
-                    preset.count,
-                    preset.ports
-                );
-                if ui.add(button).on_hover_text(tooltip).clicked() {
-                    app.ports_input = presets::apply_preset(&app.ports_input, preset.ports, append_mode);
-                }
-            }
-        });
 
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -190,38 +133,85 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         .on_hover_text("Select an interface above or manually type an IP to bind outgoing sockets");
 
         ui.add_space(8.0);
-        ui.label(RichText::new("Connection timeout").strong());
+        ui.label(RichText::new("Targets").strong());
         ui.add(
-            egui::Slider::new(&mut app.timeout_ms, 50..=5000)
-                .suffix(" ms")
-                .logarithmic(true),
+            egui::TextEdit::multiline(&mut app.targets_input)
+                .desired_rows(6)
+                .desired_width(f32::INFINITY)
+                .hint_text("10.0.0.1\n192.168.1.0/24\n10.0.0.1-10.0.0.50"),
+        )
+        .on_hover_text(
+            "One target per line: IPv4/IPv6 address, CIDR subnet or IPv4 range (# comments ignored)",
         );
 
-        ui.add_space(4.0);
-        ui.label(RichText::new("Concurrency").strong());
-        ui.add(egui::Slider::new(&mut app.concurrency, 1..=1024).logarithmic(true));
-        ui.label(RichText::new("Parallel connection attempts").weak().small());
+        ui.add_space(8.0);
+        egui::CollapsingHeader::new(RichText::new("Exclude targets (safety scope)").strong())
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut app.exclusions_input)
+                        .desired_rows(3)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("192.168.1.1, 192.168.1.200-254\n10.0.0.0/24\n2001:db8::/64"),
+                )
+                .on_hover_text(
+                    "Excluded IPs, ranges and CIDRs are never probed. Also applies after hostname DNS resolution. Comments start with #.",
+                );
+                ui.label(
+                    RichText::new("Invalid exclusions block scanning. DNS target exclusions apply after A/AAAA lookup.")
+                        .small()
+                        .weak(),
+                );
+            });
 
         ui.add_space(8.0);
-        ui.checkbox(&mut app.banner_grabbing, "Grab service banners")
-            .on_hover_text(
-                "Read service greetings or send probe to identify confirmed services (SSH, HTTP, FTP, etc.)",
-            );
+        ui.label(RichText::new("Ports").strong());
+        ui.add(
+            egui::TextEdit::singleline(&mut app.ports_input)
+                .desired_width(f32::INFINITY)
+                .hint_text("22,80,443 or 1-1024"),
+        );
 
-        if app.banner_grabbing {
-            ui.add_space(4.0);
-            ui.label(RichText::new("Banner timeout").strong());
-            ui.add(
-                egui::Slider::new(&mut app.banner_timeout_ms, 100..=5000)
-                    .suffix(" ms")
-                    .logarithmic(true),
-            );
-            ui.label(
-                RichText::new("Per-port banner read timeout (max 256 bytes)")
-                    .weak()
-                    .small(),
-            );
-        }
+        discovery::show_presets(app, ui, lang);
+
+        ui.add_space(8.0);
+        egui::CollapsingHeader::new(lang.text("Advanced settings", "Расширенные настройки"))
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.add_space(8.0);
+                ui.label(RichText::new("Connection timeout").strong());
+                ui.add(
+                    egui::Slider::new(&mut app.timeout_ms, 50..=5000)
+                        .suffix(" ms")
+                        .logarithmic(true),
+                );
+
+                ui.add_space(4.0);
+                ui.label(RichText::new("Concurrency").strong());
+                ui.add(egui::Slider::new(&mut app.concurrency, 1..=1024).logarithmic(true));
+                ui.label(RichText::new("Parallel connection attempts").weak().small());
+
+                ui.add_space(8.0);
+                ui.checkbox(&mut app.banner_grabbing, "Grab service banners")
+                    .on_hover_text(
+                        "Read service greetings or send probe to identify confirmed services (SSH, HTTP, FTP, etc.)",
+                    );
+
+                if app.banner_grabbing {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("Banner timeout").strong());
+                    ui.add(
+                        egui::Slider::new(&mut app.banner_timeout_ms, 100..=5000)
+                            .suffix(" ms")
+                            .logarithmic(true),
+                    );
+                    ui.label(
+                        RichText::new("Per-port banner read timeout (max 256 bytes)")
+                            .weak()
+                            .small(),
+                    );
+                }
+            });
 
         ui.add_space(8.0);
         egui::CollapsingHeader::new(RichText::new("Host identification").strong())
@@ -233,7 +223,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     .on_hover_text("Read-only local operating system neighbor cache; no active discovery packets and no admin access required.");
                 ui.label(RichText::new("Neighbor-cache MACs are read-only. IEEE CSV imports are offline and do not send probes.")
                     .small().weak());
-                show_oui(app, ui);
+                ui.label(lang.text("Manage reference databases in Knowledge Base.", "Управление справочниками — в Базе знаний."));
                 if app.resolve_ptr {
                     ui.add(
                         egui::Slider::new(&mut app.ptr_soft_deadline_ms, 500..=30_000)
@@ -286,59 +276,12 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
             });
 
-        ui.add_space(8.0);
-        egui::CollapsingHeader::new(RichText::new("Services database").small().strong())
-            .default_open(false)
-            .show(ui, |ui| {
-                ui.label(
-                    RichText::new(crate::scanner::services::services_db_info())
-                        .small()
-                        .weak(),
-                );
-                ui.horizontal(|ui| {
-                    if ui
-                        .small_button("Load file...")
-                        .on_hover_text(
-                            "Load an external nmap-services, /etc/services or IANA CSV file",
-                        )
-                        .clicked()
-                        && let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Services DB", &["txt", "services", "csv", "*"])
-                            .pick_file()
-                    {
-                        match crate::scanner::services::load_services_file(&path) {
-                            Ok(count) => {
-                                app.set_status(
-                                    StatusLevel::Success,
-                                    format!("Loaded {count} services from {}", path.display()),
-                                );
-                            }
-                            Err(err) => {
-                                app.set_status(
-                                    StatusLevel::Error,
-                                    format!("Services DB error: {err}"),
-                                );
-                            }
-                        }
-                    }
-                    if ui
-                        .small_button("Reset")
-                        .on_hover_text("Reset to built-in default services")
-                        .clicked()
-                    {
-                        crate::scanner::services::reset_services_to_default();
-                        app.set_status(
-                            StatusLevel::Success,
-                            "Services database reset to built-in defaults".to_owned(),
-                        );
-                    }
-                });
-            });
+
     });
 
     let preview = app.refresh_input_preview().map_err(str::to_owned);
     ui.add_space(8.0);
-    scope_feedback(&preview, running, ui);
+    discovery::show_scope(app, &preview, ui, lang);
     ui.add_space(10.0);
 
     if !app.status.is_empty() {
@@ -365,63 +308,16 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     }
 
     components::section_divider(ui);
-    summary(app, &preview, ui);
+    summary(app, ui);
 }
 
-fn scope_feedback(preview: &Result<ScopePreview, String>, running: bool, ui: &mut Ui) {
-    match preview {
-        Ok(scope) if !running => {
-            let targets_str = if scope.hostnames > 0 {
-                format!(
-                    "{} target{} ({} hostname{})",
-                    scope.targets,
-                    if scope.targets == 1 { "" } else { "s" },
-                    scope.hostnames,
-                    if scope.hostnames == 1 { "" } else { "s" },
-                )
-            } else {
-                format!(
-                    "{} target{}",
-                    scope.targets,
-                    if scope.targets == 1 { "" } else { "s" },
-                )
-            };
-            ui.label(
-                RichText::new(format!(
-                    "Planned scope: {targets_str} × {} port{} (~{} probes) · {} excluded",
-                    scope.ports,
-                    if scope.ports == 1 { "" } else { "s" },
-                    scope.probes,
-                    scope.excluded,
-                ))
-                .weak()
-                .small(),
-            );
-            if scope.hostnames > 0 {
-                ui.label(
-                    RichText::new(
-                        "DNS addresses are excluded after resolution; final scope may be smaller.",
-                    )
-                    .small()
-                    .weak(),
-                );
-            }
-        }
-        Ok(_) => {}
-        Err(err) => {
-            ui.label(RichText::new(err).color(theme::error(ui)).small());
-        }
-    }
-}
-
-fn summary(app: &App, preview: &Result<ScopePreview, String>, ui: &mut Ui) {
-    let (targets, ports, probes) = if app.is_running() || app.total_probes > 0 {
-        (app.target_count, app.port_count, app.total_probes)
-    } else if let Ok(scope) = preview {
-        (scope.targets, scope.ports, scope.probes)
-    } else {
-        (0, 0, 0)
-    };
+fn summary(app: &App, ui: &mut Ui) {
+    let lang = app.workspace.language;
+    components::section_heading(
+        ui,
+        lang.text("Last / active scan", "Последнее / активное сканирование"),
+    );
+    let (targets, ports, probes) = (app.target_count, app.port_count, app.total_probes);
 
     egui::Grid::new("scan_summary")
         .num_columns(2)
@@ -503,7 +399,7 @@ pub fn show_oui(app: &mut App, ui: &mut Ui) {
             );
         });
     }
-    let (mal, mam, mas) = app.oui_registry.counts();
+    let (_, (mal, mam, mas)) = crate::knowledge_service::source_summary(app);
     ui.label(
         RichText::new(format!(
             "IEEE OUI entries: MA-L {mal} · MA-M {mam} · MA-S {mas}"
@@ -512,4 +408,50 @@ pub fn show_oui(app: &mut App, ui: &mut Ui) {
         .weak(),
     );
     ui.label(RichText::new(&app.oui_status).small().weak());
+}
+
+pub fn show_services(app: &mut App, ui: &mut Ui) {
+    ui.add_space(8.0);
+    egui::CollapsingHeader::new(RichText::new("Services database").small().strong())
+        .default_open(false)
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(crate::knowledge_service::source_summary(app).0)
+                    .small()
+                    .weak(),
+            );
+            ui.horizontal(|ui| {
+                if ui
+                    .small_button("Load file...")
+                    .on_hover_text("Load an external nmap-services, /etc/services or IANA CSV file")
+                    .clicked()
+                    && let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Services DB", &["txt", "services", "csv", "*"])
+                        .pick_file()
+                {
+                    match crate::scanner::services::load_services_file(&path) {
+                        Ok(count) => {
+                            app.set_status(
+                                StatusLevel::Success,
+                                format!("Loaded {count} services from {}", path.display()),
+                            );
+                        }
+                        Err(err) => {
+                            app.set_status(StatusLevel::Error, format!("Services DB error: {err}"));
+                        }
+                    }
+                }
+                if ui
+                    .small_button("Reset")
+                    .on_hover_text("Reset to built-in default services")
+                    .clicked()
+                {
+                    crate::scanner::services::reset_services_to_default();
+                    app.set_status(
+                        StatusLevel::Success,
+                        "Services database reset to built-in defaults".to_owned(),
+                    );
+                }
+            });
+        });
 }

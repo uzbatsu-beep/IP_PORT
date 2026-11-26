@@ -79,3 +79,8 @@ For TCP, connect success indicates an accepting endpoint, not application identi
 - Siemens S7-300/400/1200 and VIPA/Speed7, Omron CJ/NJ/NX model matrices, OWEN PLK100/160/200 and CODESYS v2.3 differences.
 - Additional vendors: KUKA, Kawasaki, ABB, FANUC, Delta, Inovance, WAGO, B&R, Phoenix Contact, Keyence, LS Electric; energy and instrumentation; dedicated protocol documentation and hardware observations.
 - Add protocol response validation and identity provenance only in future functional PRs. Do not assign manufacturer confidence from a port pattern alone.
+
+
+## UI-03.4 candidate presets
+
+Discovery uses a reviewed record-ID allowlist in `src/knowledge_service.rs` instead of blindly converting every catalog row to a port list. Candidate ports are derived from the existing numeric fields using the existing parser, sorted/deduplicated and separated by transport. Vendor/family filtering is exact against catalog labels; combined family labels remain combined. Protocol group membership is explicit. No automatic scanning, identification or port replacement. Conditional entries, unknown/configurable ports, L2, cyclic I/O, trap receivers, and ambiguous directions are excluded. UDP entries are only configuration candidates, not proof that the current generic UDP probe can identify the protocol. Catalog remains 52 records; no new primary-source review is claimed in UI-03.4.

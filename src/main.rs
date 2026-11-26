@@ -3,6 +3,7 @@
 mod app;
 mod export;
 mod host_info;
+mod knowledge_service;
 mod oui_registry;
 mod oui_store;
 mod profile;

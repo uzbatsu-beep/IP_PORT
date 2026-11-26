@@ -161,3 +161,6 @@ UI-03.2 adds six functional routes and collapsible vector navigation, persistent
 
 
 UI-03.3 adds a global two-level toolbar: start/stop, profiles, export, scan context, theme and settings. Ctrl/Cmd+O loads a profile and Ctrl/Cmd+S saves one when no scan is active. Reports uses the same command dispatcher; Discovery retains configuration, not duplicated controls.
+
+
+Upcoming v0.5.0 (development): Discovery adds General / Industrial / Custom, curated catalog-derived port candidates by manufacturer/family/protocol, source links, and enhanced ScopePreview. JSON profile v1 remains compatible. The published stable release remains v0.4.0 until the v0.5.0 release workflow completes.

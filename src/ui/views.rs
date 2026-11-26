@@ -32,6 +32,7 @@ pub fn show(section: Section, app: &mut App, ui: &mut Ui) {
                     .show(ui, |ui| {
                         ui.add_enabled_ui(!app.is_running(), |ui| sidebar::show_oui(app, ui));
                     });
+                ui.add_enabled_ui(!app.is_running(), |ui| sidebar::show_services(app, ui));
                 ui.separator();
                 knowledge::show(&mut app.workspace.knowledge_query, language, ui);
             }

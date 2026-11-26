@@ -227,3 +227,11 @@
 - Two-level global toolbar and centralized command availability/dispatch; profile shortcuts Ctrl/Cmd+O and Ctrl/Cmd+S.
 - Active scan context snapshot; guarded profile/target changes; export remains available during scanning.
 - Discovery command duplicates removed; scan engine, profiles and export formats unchanged. Industrial knowledge catalog retained.
+
+
+### UI-03.4 / v0.5.0 (unreleased)
+
+- Discovery modes and curated industrial port candidates with explicit replace/append, source evidence and transport separation.
+- Shared read-only knowledge facade; existing OUI and services controls in Knowledge Base.
+- Enhanced existing ScopePreview, separate planned and actual counters, timeout-only estimate. Profile v1 unchanged.
+- Prepare Cargo package and lockfile version 0.5.0. No new probes or dependencies.
