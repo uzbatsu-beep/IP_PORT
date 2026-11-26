@@ -256,7 +256,7 @@ pub fn show_row_context_menu(app: &mut App, entry: &ResultRow, ui: &mut egui::Ui
 
 /// Отображает нижнюю панель быстрых действий для выделенной строки.
 pub fn show_inspector_toolbar(app: &mut App, entry_idx: usize, ui: &mut Ui) {
-    if entry_idx >= app.results.len() {
+    if entry_idx >= app.results().len() {
         return;
     }
     let entry = app.row(entry_idx).clone();

@@ -11,9 +11,9 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-def select_run(runs: list[dict], sha: str) -> dict:
+def select_run(runs: list[dict], sha: str, event: str = "push") -> dict:
     exact = [r for r in runs if r.get("head_sha") == sha
-             and r.get("head_branch") == "main" and r.get("event") == "push"]
+             and r.get("head_branch") == "main" and r.get("event") == event]
     if not exact:
         raise ValueError("No CI push run on main for this exact SHA")
     run = max(exact, key=lambda r: (r.get("created_at", ""), r["id"]))
@@ -22,8 +22,8 @@ def select_run(runs: list[dict], sha: str) -> dict:
     return run
 
 
-def require_gate(jobs: list[dict]) -> None:
-    gates = [j for j in jobs if j.get("name") == "Quality Gate"]
+def require_gate(jobs: list[dict], name: str = "Quality Gate") -> None:
+    gates = [j for j in jobs if j.get("name") == name]
     if len(gates) != 1 or gates[0].get("status") != "completed" or gates[0].get("conclusion") != "success":
         raise ValueError("Missing or unsuccessful Quality Gate")
 
@@ -50,7 +50,13 @@ def main() -> int:
         if jobs["total_count"] > len(jobs["jobs"]):
             raise ValueError("Incomplete job listing")
         require_gate(jobs["jobs"])
-        print(f"Release SHA {sha}: successful main CI {run['id']}, Quality Gate passed")
+        cross_query = urlencode({"head_sha": sha, "branch": "main", "event": "workflow_dispatch", "per_page": 100})
+        cross = select_run(get("actions/workflows/cross-platform.yml/runs?" + cross_query)["workflow_runs"], sha, "workflow_dispatch")
+        cross_jobs = get(f"actions/runs/{cross['id']}/jobs?filter=latest&per_page=100")
+        if cross_jobs["total_count"] > len(cross_jobs["jobs"]):
+            raise ValueError("Incomplete cross-platform job listing")
+        require_gate(cross_jobs["jobs"], "Cross-platform Gate")
+        print(f"Release SHA {sha}: main CI {run['id']} and cross-platform acceptance {cross['id']} passed")
         return 0
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         print(f"Release blocked: {error}", file=sys.stderr)

@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### Dependency maintenance — DNS resolver
+- Adapt dns-lookup 4.0.2 typed resolver errors; preserve explicit absent name vs resolver failures, bounded native-code diagnostics and background lookup. Add deterministic Windows and platform-independent regressions.
+
+### ENG-01.C1 — ResultsStore and Windows-first CI
+- Encapsulate one authoritative result store, stable generation/index IDs, revision-based RTT cache, bounded overflow and owned export snapshots.
+- Preserve index projection and selection pending C2/C3; add ID, clear, capacity and snapshot regressions.
+- Windows-first routine CI and MSRV; retain audit/Quality Gate, manual Linux/macOS acceptance and exact-SHA cross-platform release gate.
+
 ### ENG-01.B — quality and performance pipeline
 - Resolve initial Cargo Deny font-license finding with a proposed exact-package allowance and distribution of original upstream notices; retain security checks and report dependency diagnostics in CI logs.
 - Add optimized eight-scenario performance QA with validated JSON and best-effort RSS; retain existing debug performance/stress gates.
