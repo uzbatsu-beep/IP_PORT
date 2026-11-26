@@ -1998,7 +1998,7 @@ mod tests {
 
         app.drain_events_with_budget(10);
         assert_eq!(app.results.len(), 1);
-        assert_eq!(app.results.get(0).unwrap().port, 80);
+        assert_eq!(app.results.rows()[0].raw.port, 80);
     }
 
     #[test]
@@ -2155,7 +2155,7 @@ mod tests {
         app.push_result(sample_result(1, 80, "http", 2));
         app.push_result(sample_result(1, 22, "ssh", 1));
         app.ensure_device_rows();
-        let ip = app.results.get(1).unwrap().ip;
+        let ip = app.results.rows()[1].raw.ip;
         let id = app.results.id_at(1).unwrap();
         let metrics = app.projection.metrics();
         app.select_endpoint(1);

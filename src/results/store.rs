@@ -145,11 +145,6 @@ impl ResultsStore {
         self.index_of(id).map(|index| &self.rows[index].raw)
     }
 
-    /// Compatibility with the index-based projection.
-    pub fn get(&self, index: usize) -> Option<&ScanResult> {
-        self.resolve(self.id_at(index)?)
-    }
-
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &ScanResult> {
         self.rows.iter().map(|row| &row.raw)
     }
@@ -229,6 +224,6 @@ mod tests {
         store.insert(observation(502)).unwrap();
         assert_eq!(store.dropped(), 0);
         assert_eq!(snapshot[0].port, 1);
-        assert_eq!(store.get(0).unwrap().port, 502);
+        assert_eq!(store.resolve(store.id_at(0).unwrap()).unwrap().port, 502);
     }
 }

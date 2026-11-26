@@ -428,10 +428,12 @@ mod tests {
         );
         app.push_result(res);
         app.ensure_results_view();
+        app.select_endpoint(0);
+        assert_eq!(app.selected_endpoint_index(), Some(0));
 
         let ctx = egui::Context::default();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            show_inspector_toolbar(&mut app, 0, ui);
+            show_inspector_toolbar(&mut app, ui);
             let entry = app.row(0).clone();
             ui.menu_button("Test Menu", |ui| {
                 show_row_context_menu(&mut app, &entry, ui);
