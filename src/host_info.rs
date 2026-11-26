@@ -547,7 +547,9 @@ mod tests {
         for code in [WSANO_RECOVERY, WSATRY_AGAIN] {
             let (name, state) = classify_ptr(Err(LookupError::new(code)));
             assert!(name.is_none());
-            assert!(matches!(state, PtrStatus::Failed(reason) if reason.contains(&code.to_string())));
+            assert!(
+                matches!(state, PtrStatus::Failed(reason) if reason.contains(&code.to_string()))
+            );
         }
     }
 
