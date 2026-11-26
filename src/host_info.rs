@@ -1,6 +1,7 @@
 //! Best-effort, read-only host enrichment. Never transmits ARP/NDP probes.
 //! PTR uses the platform resolver via dns-lookup; neighbors are OS cache snapshots.
 //! No host-identification I/O runs on egui's rendering thread.
+use dns_lookup::{LookupError, LookupErrorKind};
 use std::collections::HashMap;
 use std::io;
 use std::net::IpAddr;
@@ -44,18 +45,28 @@ pub struct HostInfo {
     pub neighbor_ambiguous: bool,
 }
 
-/// Map platform results without claiming all DNS lookup failures mean NXDOMAIN.
-fn classify_ptr(ip: IpAddr, result: io::Result<String>) -> (Option<String>, PtrStatus) {
+/// Preserve typed resolver errors: only explicit NoName/NoData indicate absence.
+/// Platform resolver results do not prove a particular DNS response code.
+fn classify_ptr_failure(kind: LookupErrorKind, code: i32, message: &str) -> PtrStatus {
+    match kind {
+        LookupErrorKind::NoName | LookupErrorKind::NoData => PtrStatus::NoName,
+        _ => {
+            let diagnostic = format!("{kind:?} ({code}): {message}");
+            PtrStatus::Failed(diagnostic.chars().take(240).collect())
+        }
+    }
+}
+
+fn classify_ptr(result: Result<String, LookupError>) -> (Option<String>, PtrStatus) {
     match result {
-        Ok(name) if !name.trim().is_empty() && name.trim() != ip.to_string() => {
+        Ok(name) if !name.trim().is_empty() && name.trim().parse::<IpAddr>().is_err() => {
             (Some(name.trim().to_owned()), PtrStatus::Resolved)
         }
         Ok(_) => (None, PtrStatus::NoName),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => (None, PtrStatus::NoName),
-        Err(err) => {
-            let message: String = err.to_string().chars().take(240).collect();
-            (None, PtrStatus::Failed(message))
-        }
+        Err(err) => (
+            None,
+            classify_ptr_failure(err.kind(), err.error_num(), &err.to_string()),
+        ),
     }
 }
 
@@ -131,7 +142,7 @@ impl HostInfoWorker {
                         }
                         let (hostname, ptr_status, ptr_duration_ms) = if resolve_ptr {
                             let started = Instant::now();
-                            let (name, status) = classify_ptr(ip, dns_lookup::lookup_addr(&ip));
+                            let (name, status) = classify_ptr(dns_lookup::lookup_addr(&ip));
                             let elapsed =
                                 started.elapsed().as_millis().min(u64::MAX as u128) as u64;
                             (name, status, Some(elapsed))
@@ -484,24 +495,62 @@ mod tests {
 
     #[test]
     fn distinguishes_ptr_success_absence_and_resolver_errors() {
-        let ip: IpAddr = "192.0.2.10".parse().unwrap();
-        let (name, state) = classify_ptr(ip, Ok("host.example.test".to_owned()));
+        let (name, state) = classify_ptr(Ok(" host.example.test ".to_owned()));
         assert_eq!(name.as_deref(), Some("host.example.test"));
         assert_eq!(state, PtrStatus::Resolved);
-        let (name, state) = classify_ptr(ip, Ok(ip.to_string()));
-        assert!(name.is_none());
-        assert_eq!(state, PtrStatus::NoName);
-        let (name, state) = classify_ptr(ip, Err(io::Error::from(io::ErrorKind::NotFound)));
-        assert!(name.is_none());
-        assert_eq!(state, PtrStatus::NoName);
-        let (_, state) = classify_ptr(
-            ip,
-            Err(io::Error::new(
-                io::ErrorKind::TimedOut,
-                "synthetic resolver timeout",
-            )),
-        );
+        for value in ["192.0.2.10", "2001:0db8:0:0:0:0:0:1", "", "   "] {
+            let (name, state) = classify_ptr(Ok(value.to_owned()));
+            assert!(name.is_none());
+            assert_eq!(state, PtrStatus::NoName);
+        }
+        for kind in [LookupErrorKind::NoName, LookupErrorKind::NoData] {
+            assert_eq!(classify_ptr_failure(kind, 0, ""), PtrStatus::NoName);
+        }
+        let (_, state) = classify_ptr(Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "synthetic resolver timeout",
+        )
+        .into()));
         assert!(matches!(state, PtrStatus::Failed(reason) if reason.contains("timeout")));
+    }
+
+    #[test]
+    fn ptr_failure_does_not_infer_absence_from_generic_io() {
+        let (name, state) = classify_ptr(Err(io::Error::from(io::ErrorKind::NotFound).into()));
+        assert!(name.is_none());
+        assert!(matches!(state, PtrStatus::Failed(_)));
+        for kind in [
+            LookupErrorKind::Again,
+            LookupErrorKind::Fail,
+            LookupErrorKind::System,
+            LookupErrorKind::Unknown,
+            LookupErrorKind::IO,
+        ] {
+            let state = classify_ptr_failure(kind, 123, &"я".repeat(300));
+            assert!(matches!(state, PtrStatus::Failed(reason)
+                if reason.contains("123") && reason.chars().count() == 240));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn ptr_windows_native_error_codes_use_typed_mapping() {
+        use windows_sys::Win32::Networking::WinSock::{
+            WSAHOST_NOT_FOUND, WSANO_DATA, WSANO_RECOVERY, WSATRY_AGAIN,
+        };
+
+        for code in [WSAHOST_NOT_FOUND, WSANO_DATA] {
+            let (name, state) = classify_ptr(Err(LookupError::new(code)));
+            assert!(name.is_none());
+            assert_eq!(state, PtrStatus::NoName);
+        }
+        for code in [WSANO_RECOVERY, WSATRY_AGAIN] {
+            let (name, state) = classify_ptr(Err(LookupError::new(code)));
+            assert!(name.is_none());
+            assert!(
+                matches!(state, PtrStatus::Failed(reason) if reason.contains(&code.to_string()))
+            );
+        }
     }
 
     #[test]

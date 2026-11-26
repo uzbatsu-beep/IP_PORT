@@ -19,7 +19,7 @@ eframe = { version = "0.37", default-features = false, features = [
 egui = "0.37"
 egui_extras = "0.37"
 get_if_addrs = "0.5"
-dns-lookup = "2.0"
+dns-lookup = "4.0"
 csv = "1.4"
 ipnet = "2"
 rfd = "0.18"

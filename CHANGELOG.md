@@ -9,6 +9,9 @@
 
 ## [Unreleased]
 
+### Dependency maintenance — DNS resolver
+- Adapt dns-lookup 4.0.2 typed resolver errors; preserve explicit absent name vs resolver failures, bounded native-code diagnostics and background lookup. Add deterministic Windows and platform-independent regressions.
+
 ### ENG-01.C1 — ResultsStore and Windows-first CI
 - Encapsulate one authoritative result store, stable generation/index IDs, revision-based RTT cache, bounded overflow and owned export snapshots.
 - Preserve index projection and selection pending C2/C3; add ID, clear, capacity and snapshot regressions.
