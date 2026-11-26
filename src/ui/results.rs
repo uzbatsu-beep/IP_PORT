@@ -265,6 +265,38 @@ fn endpoint_cells(
     });
 }
 
+fn host_details(info: &crate::host_info::HostInfo, ptr_deadline: u64) -> String {
+    use std::fmt::Write as _;
+
+    let mut text = format!(
+        "PTR: {}\nPTR status: {}\nCached MAC: {}\nOUI: {}\nOUI owner: {}",
+        info.hostname.as_deref().unwrap_or("N/A"),
+        info.ptr_status.summary(),
+        info.mac.as_deref().unwrap_or("Not in local cache"),
+        info.oui.as_deref().unwrap_or("N/A"),
+        info.vendor.as_deref().unwrap_or("Unknown"),
+    );
+    if let Some(ms) = info.ptr_duration_ms {
+        let _ = write!(text, "\nPTR duration: {ms} ms");
+        if ms >= ptr_deadline {
+            text.push_str("\nPTR exceeded warning threshold (no forced cancellation)");
+        }
+    }
+    if let crate::host_info::PtrStatus::Failed(reason) = &info.ptr_status {
+        let _ = write!(text, "\nPTR error: {reason}");
+    }
+    if let Some(reason) = &info.neighbor_error {
+        let _ = write!(text, "\nNeighbor-cache error: {reason}");
+    }
+    if !info.neighbor_interfaces.is_empty() {
+        let _ = write!(text, "\nNeighbor interfaces:\n{}", info.neighbor_interfaces.join("\n"));
+    }
+    if info.neighbor_ambiguous {
+        text.push_str("\nAmbiguous neighbor records; MAC not attributed");
+    }
+    text
+}
+
 fn render_ports(app: &mut App, ui: &mut Ui, lang: Language) {
     let mut sort = app.sort_column;
     let mut ascending = app.sort_ascending;
@@ -333,7 +365,18 @@ fn render_ports(app: &mut App, ui: &mut Ui, lang: Language) {
                             app.selected_result == Some(index) && !app.selected_host_only,
                         );
                         row.col(|ui| {
-                            cell(ui, &entry.ip_text);
+                            let info = app.host_info.get(&entry.raw.ip);
+                            let address = info
+                                .and_then(|i| i.hostname.as_deref())
+                                .map_or_else(|| entry.ip_text.clone(), |name| {
+                                    format!("{} {name}", entry.ip_text)
+                                });
+                            let response = ui.add(egui::Label::new(&address).truncate());
+                            if let Some(info) = info {
+                                response.on_hover_text(host_details(info, app.ptr_soft_deadline_ms));
+                            } else {
+                                response.on_hover_text(&address);
+                            }
                         });
                         endpoint_cells(&mut row, &entry, lang);
                         if row.response().clicked() || row.response().secondary_clicked() {
@@ -454,7 +497,17 @@ fn render_devices(app: &mut App, ui: &mut Ui, lang: Language) {
                                                 "▸"
                                             })
                                             .clicked();
-                                        cell(ui, &format!("{ip_text} {name}"));
+                                        let address = format!("{ip_text} {name}");
+                                        let response =
+                                            ui.add(egui::Label::new(&address).truncate());
+                                        if let Some(info) = app.host_info.get(&ip) {
+                                            response.on_hover_text(host_details(
+                                                info,
+                                                app.ptr_soft_deadline_ms,
+                                            ));
+                                        } else {
+                                            response.on_hover_text(&address);
+                                        }
                                     });
                                 });
                                 row.col(|ui| {
