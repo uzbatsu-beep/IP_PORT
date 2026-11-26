@@ -1690,17 +1690,30 @@ mod tests {
         app.selected_result = Some(0);
         app.results_filter = "http".to_owned();
         let targets = app.targets_input.clone();
-        for section in Section::ALL {
+        let ctx = egui::Context::default();
+        crate::ui::theme::apply(&ctx);
+        for (index, section) in Section::ALL.into_iter().enumerate() {
             app.workspace.section = section;
+            tx.blocking_send(ScanEvent::Open(sample_result(
+                (index + 2) as u8,
+                80,
+                "http",
+                1,
+            )))
+            .unwrap();
+            let output =
+                run_headless_frame(&mut app, &ctx, egui::vec2(1180.0, 760.0), 1.0, vec![]);
+            assert!(!output.shapes.is_empty());
             assert!(app.is_running());
             assert!(!cancel.is_cancelled());
             assert_eq!(app.selected_result, Some(0));
             assert_eq!(app.results_filter, "http");
             assert_eq!(app.targets_input, targets);
             assert!(!tx.is_closed());
+            assert_eq!(app.results.len(), index + 2);
         }
         app.workspace.section = Section::Discovery;
-        assert_eq!(app.results.len(), 1);
+        assert_eq!(app.results.len(), Section::ALL.len() + 1);
     }
 
     #[test]
