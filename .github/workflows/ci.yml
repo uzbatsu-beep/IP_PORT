@@ -104,6 +104,8 @@ jobs:
           path: |
             target/${{ matrix.target }}/release/ip_port_scanner
             target/${{ matrix.target }}/release/ip_port_scanner.exe
+            THIRD_PARTY_NOTICES.md
+            third-party/epaint_default_fonts/
           if-no-files-found: error
           retention-days: 7
 
@@ -147,13 +149,38 @@ jobs:
       - name: Install pinned toolchain and audit tools
         run: |
           rustup show
-          cargo install --locked --version 0.23.0 cargo-audit
-          cargo install --locked --version 0.22.1 cargo-deny
+          cargo +1.100.0 install --locked --version 0.23.0 cargo-audit
+          cargo +1.100.0 install --locked --version 0.22.1 cargo-deny
       - name: RustSec audit
-        run: cargo audit --json > cargo-audit.json
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo audit --json | tee cargo-audit.json
       - name: Dependency policy
         if: always()
-        run: cargo deny --locked --format json check > cargo-deny.json 2> cargo-deny-diagnostics.json
+        shell: bash
+        run: |
+          set -o pipefail
+          status=0
+          cargo deny --locked --format json check > cargo-deny.json 2> cargo-deny-diagnostics.json || status=$?
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          for line in Path("cargo-deny-diagnostics.json").read_text(encoding="utf-8").splitlines():
+              try:
+                  record = json.loads(line)
+                  fields = record.get("fields", {})
+                  if record.get("type") == "summary":
+                      print(json.dumps(fields))
+                  elif fields.get("severity") in ("error", "warning"):
+                      print(f"{fields['severity']}: {fields.get('code', '')}: {fields.get('message', '')}")
+                      for label in fields.get("labels", []):
+                          if label.get("message"):
+                              print(f"  {label['message']}: {label.get('span', '')}")
+              except (ValueError, TypeError, AttributeError):
+                  print(line)
+          PY
+          exit "$status"
       - name: Upload dependency reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

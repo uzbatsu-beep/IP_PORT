@@ -10,6 +10,7 @@
 ## [Unreleased]
 
 ### ENG-01.B — quality and performance pipeline
+- Resolve initial Cargo Deny font-license finding with a proposed exact-package allowance and distribution of original upstream notices; retain security checks and report dependency diagnostics in CI logs.
 - Add optimized eight-scenario performance QA with validated JSON and best-effort RSS; retain existing debug performance/stress gates.
 - Add pinned Cargo Audit/Deny, license/source policy, weekly Dependabot and mandatory Quality Gate.
 - Require successful exact-SHA main CI before release build; prepare Ruleset JSON without applying repository settings.

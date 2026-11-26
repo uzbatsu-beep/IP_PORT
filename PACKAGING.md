@@ -201,3 +201,5 @@ cargo build --locked --release
 
 
 ENG-01.A: release builds use the exact Rust version in rust-toolchain.toml and `--locked`; see [ENGINEERING.md](ENGINEERING.md). This locks the Rust/dependency inputs, not the entire OS/linker environment.
+
+Release and CI artifacts include [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the original bundled font license notices. CI artifacts may retain target/ paths because the upload root is now the repository root; locate ip_port_scanner.exe within the ZIP. No font binaries are added.
