@@ -6,6 +6,10 @@ use std::time::{Duration, Instant};
 use crate::host_info::{HostInfo, HostInfoEvent, HostInfoWorker, PtrStatus};
 use crate::oui_registry::OuiRegistry;
 use crate::oui_store::{ImportedOui, RestoredOui};
+#[cfg(test)]
+use crate::results::store::MAX_STORED_RESULTS;
+pub use crate::results::store::ResultRow;
+use crate::results::store::{ResultsStore, contains_ascii_case_insensitive};
 use crate::scanner::{
     self, PortState, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
 };
@@ -14,7 +18,6 @@ use crate::ui;
 
 /// Максимальное число событий сканера, обрабатываемых за один кадр UI.
 pub const MAX_EVENTS_PER_FRAME: usize = 1024;
-pub const MAX_STORED_RESULTS: usize = 100_000;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SortColumn {
@@ -145,54 +148,6 @@ pub struct ScopePreview {
     pub excluded: usize,
     pub ports: usize,
     pub probes: usize,
-}
-
-#[derive(Clone, Debug)]
-pub struct ResultRow {
-    pub raw: ScanResult,
-    pub ip_text: String,
-    pub port_text: String,
-    pub protocol_text: &'static str,
-    pub state_text: &'static str,
-    pub latency_text: String,
-}
-
-impl ResultRow {
-    fn from_result(raw: ScanResult) -> Self {
-        let ip_text = raw.ip.to_string();
-        let port_text = raw.port.to_string();
-        let protocol_text = raw.protocol.as_str();
-        let state_text = raw.state.as_str();
-        let latency_text = if raw.state == PortState::OpenFiltered {
-            "—".to_owned()
-        } else {
-            format!("{:.2} ms", raw.rtt.as_secs_f64() * 1000.0)
-        };
-        Self {
-            raw,
-            ip_text,
-            port_text,
-            protocol_text,
-            state_text,
-            latency_text,
-        }
-    }
-
-    fn matches_lowercase_query(&self, query_lower: &str) -> bool {
-        query_lower.is_empty()
-            || contains_ascii_case_insensitive(&self.ip_text, query_lower)
-            || self.port_text.contains(query_lower)
-            || contains_ascii_case_insensitive(self.protocol_text, query_lower)
-            || contains_ascii_case_insensitive(self.state_text, query_lower)
-            || contains_ascii_case_insensitive(&self.raw.service, query_lower)
-            || contains_ascii_case_insensitive(self.protocol_text, query_lower)
-            || contains_ascii_case_insensitive(self.state_text, query_lower)
-            || self
-                .raw
-                .banner
-                .as_ref()
-                .is_some_and(|banner| contains_ascii_case_insensitive(banner, query_lower))
-    }
 }
 
 struct InputCache {
@@ -399,7 +354,7 @@ pub struct App {
 
     pub status: String,
     pub status_level: StatusLevel,
-    pub results: Vec<ScanResult>,
+    results: ResultsStore,
     pub results_filter: String,
     pub filters: ResultFilters,
     pub host_sort: HostSort,
@@ -416,11 +371,9 @@ pub struct App {
     pub total_probes: usize,
     pub done_probes: usize,
     pub probe_counts: ProbeCounts,
-    pub dropped_open_results: usize,
     pub toasts: Vec<Toast>,
     scan_started_at: Option<Instant>,
 
-    rows: Vec<ResultRow>,
     visible_indices: Vec<usize>,
     host_groups: Vec<HostGroup>,
     device_rows: Vec<DeviceRow>,
@@ -428,7 +381,7 @@ pub struct App {
     cached_filters: ResultFilters,
     cached_host_sort: (HostSort, bool),
     cached_rtt_stats: Option<crate::ui::rtt_view::RttStats>,
-    rtt_stats_dirty: bool,
+    cached_rtt_revision: Option<u64>,
     cached_filter: String,
     cached_sort_column: SortColumn,
     cached_sort_ascending: bool,
@@ -506,7 +459,7 @@ impl App {
             protocol: ScanProtocol::Tcp,
             status: String::new(),
             status_level: StatusLevel::Idle,
-            results: Vec::new(),
+            results: ResultsStore::default(),
             results_filter: String::new(),
             filters: ResultFilters::default(),
             host_sort: HostSort::Address,
@@ -522,10 +475,8 @@ impl App {
             total_probes: 0,
             done_probes: 0,
             probe_counts: ProbeCounts::default(),
-            dropped_open_results: 0,
             toasts: Vec::new(),
             scan_started_at: None,
-            rows: Vec::new(),
             visible_indices: Vec::new(),
             host_groups: Vec::new(),
             device_rows: Vec::new(),
@@ -533,7 +484,7 @@ impl App {
             cached_filters: ResultFilters::default(),
             cached_host_sort: (HostSort::Address, true),
             cached_rtt_stats: None,
-            rtt_stats_dirty: true,
+            cached_rtt_revision: None,
             cached_filter: String::new(),
             cached_sort_column: SortColumn::Address,
             cached_sort_ascending: true,
@@ -673,7 +624,6 @@ impl App {
         self.total_probes = preview.probes;
         self.done_probes = 0;
         self.probe_counts = ProbeCounts::default();
-        self.dropped_open_results = 0;
         self.scan_started_at = Some(Instant::now());
         self.set_status(
             StatusLevel::Running,
@@ -716,22 +666,19 @@ impl App {
     }
 
     pub fn push_result(&mut self, result: ScanResult) {
-        if self.results.len() >= MAX_STORED_RESULTS {
-            self.dropped_open_results += 1;
+        let ip = result.ip;
+        if self.results.insert(result).is_none() {
             return;
         }
-        if !self.host_info.contains_key(&result.ip)
-            && !self.host_info_pending.contains(&result.ip)
+        if !self.host_info.contains_key(&ip)
+            && !self.host_info_pending.contains(&ip)
             && self.host_info_worker.is_some()
         {
-            self.host_info_pending.insert(result.ip);
-            self.host_info_backlog.push_back(result.ip);
+            self.host_info_pending.insert(ip);
+            self.host_info_backlog.push_back(ip);
             self.flush_host_info_backlog();
         }
-        self.rows.push(ResultRow::from_result(result.clone()));
-        self.results.push(result);
         self.view_dirty = true;
-        self.rtt_stats_dirty = true;
     }
 
     fn start_host_enrichment(&mut self) {
@@ -1010,7 +957,7 @@ impl App {
         let vendor_filter = self.filters.vendor.trim().to_ascii_lowercase();
         let service_filter = self.filters.service.trim().to_ascii_lowercase();
         self.visible_indices.clear();
-        for (idx, row) in self.rows.iter().enumerate() {
+        for (idx, row) in self.results.rows().iter().enumerate() {
             let info_matches =
                 self.host_info.get(&row.raw.ip).is_some_and(|info| {
                     info.hostname
@@ -1035,7 +982,7 @@ impl App {
             }
         }
 
-        let rows = &self.rows;
+        let rows = self.results.rows();
         let sort_column = self.sort_column;
         let sort_ascending = self.sort_ascending;
         self.visible_indices.sort_by(|&a_idx, &b_idx| {
@@ -1076,7 +1023,7 @@ impl App {
         let mut groups_map: Vec<(IpAddr, Vec<usize>)> = Vec::new();
         let mut host_indices = std::collections::HashMap::<IpAddr, usize>::new();
         for &idx in &self.visible_indices {
-            let ip = self.rows[idx].raw.ip;
+            let ip = self.results.rows()[idx].raw.ip;
             if let Some(&group_idx) = host_indices.get(&ip) {
                 groups_map[group_idx].1.push(idx);
             } else {
@@ -1086,7 +1033,7 @@ impl App {
         }
         self.host_groups = groups_map
             .into_iter()
-            .map(|(ip, indices)| HostGroup::build(ip, indices, &self.rows))
+            .map(|(ip, indices)| HostGroup::build(ip, indices, self.results.rows()))
             .collect();
         let info = &self.host_info;
         let sort = self.host_sort;
@@ -1156,7 +1103,7 @@ impl App {
         let group = &self.host_groups[group_index];
         if !self
             .selected_result
-            .is_some_and(|idx| self.rows.get(idx).is_some_and(|r| r.raw.ip == group.ip))
+            .is_some_and(|idx| self.results.rows().get(idx).is_some_and(|r| r.raw.ip == group.ip))
         {
             self.selected_result = group.indices.first().copied();
         }
@@ -1165,7 +1112,7 @@ impl App {
 
     pub fn selected_device_position(&self) -> Option<usize> {
         let index = self.selected_result?;
-        let ip = self.rows.get(index)?.raw.ip;
+        let ip = self.results.rows().get(index)?.raw.ip;
         if !self.selected_host_only
             && self.host_expanded(ip)
             && let Some(pos) = self
@@ -1183,11 +1130,16 @@ impl App {
 
     /// Cache latency distribution until scan results change, not once per UI frame.
     pub fn current_rtt_stats(&mut self) -> Option<crate::ui::rtt_view::RttStats> {
-        if self.rtt_stats_dirty {
-            self.cached_rtt_stats = crate::ui::rtt_view::calculate_rtt_stats(&self.results);
-            self.rtt_stats_dirty = false;
+        let revision = self.results.revision();
+        if self.cached_rtt_revision != Some(revision) {
+            self.cached_rtt_stats = crate::ui::rtt_view::calculate_rtt_stats(self.results.iter());
+            self.cached_rtt_revision = Some(revision);
         }
         self.cached_rtt_stats.clone()
+    }
+
+    pub fn results(&self) -> &ResultsStore {
+        &self.results
     }
 
     pub fn visible_indices(&self) -> &[usize] {
@@ -1199,7 +1151,7 @@ impl App {
     }
 
     pub fn row(&self, index: usize) -> &ResultRow {
-        &self.rows[index]
+        &self.results.rows()[index]
     }
 
     #[cfg(test)]
@@ -1270,7 +1222,7 @@ impl App {
         };
         self.last_export_dir = path.parent().map(PathBuf::from);
 
-        let snapshot = self.results.clone();
+        let snapshot = self.results.snapshot();
         let host_metadata = self.host_info.clone();
         let snapshot_count = snapshot.len();
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -1445,7 +1397,6 @@ impl App {
 
     pub(crate) fn clear_results_storage(&mut self) {
         self.results.clear();
-        self.rows.clear();
         self.visible_indices.clear();
         self.host_groups.clear();
         self.device_rows.clear();
@@ -1460,10 +1411,9 @@ impl App {
         self.host_info_stats = HostInfoStats::default();
         self.host_info_worker = None;
         self.cached_rtt_stats = None;
-        self.rtt_stats_dirty = true;
+        self.cached_rtt_revision = None;
         self.selected_result = None;
         self.view_dirty = false;
-        self.dropped_open_results = 0;
     }
 
     pub fn set_status(&mut self, level: StatusLevel, status: String) {
@@ -1606,10 +1556,10 @@ impl App {
                 .take()
                 .map(|started_at| started_at.elapsed().as_secs_f64())
                 .unwrap_or_default();
-            let stored_note = if self.dropped_open_results > 0 {
+            let stored_note = if self.results.dropped() > 0 {
                 format!(
                     " · {} open results not stored (limit)",
-                    self.dropped_open_results
+                    self.results.dropped()
                 )
             } else {
                 String::new()
@@ -1652,23 +1602,6 @@ impl App {
 
         processed
     }
-}
-
-fn contains_ascii_case_insensitive(haystack: &str, needle_lower: &str) -> bool {
-    let needle = needle_lower.as_bytes();
-    if needle.is_empty() {
-        return true;
-    }
-    let hay = haystack.as_bytes();
-    if needle.len() > hay.len() {
-        return false;
-    }
-    hay.windows(needle.len()).any(|window| {
-        window
-            .iter()
-            .zip(needle.iter())
-            .all(|(h, n)| h.to_ascii_lowercase() == *n)
-    })
 }
 
 impl App {
@@ -2167,11 +2100,11 @@ mod tests {
         app.push_result(sample_result(1, 1, "unknown", 1));
 
         assert_eq!(app.results.len(), MAX_STORED_RESULTS);
-        assert_eq!(app.rows.len(), MAX_STORED_RESULTS);
-        assert_eq!(app.dropped_open_results, 1);
+        assert_eq!(app.results.rows().len(), MAX_STORED_RESULTS);
+        assert_eq!(app.results.dropped(), 1);
 
         app.clear_results();
-        assert_eq!(app.dropped_open_results, 0);
+        assert_eq!(app.results.dropped(), 0);
     }
 
     #[test]
@@ -2327,7 +2260,7 @@ mod tests {
 
         app.drain_events_with_budget(10);
         assert_eq!(app.results.len(), 1);
-        assert_eq!(app.results[0].port, 80);
+        assert_eq!(app.results.get(0).unwrap().port, 80);
     }
 
     #[test]
@@ -3723,7 +3656,7 @@ mod tests {
         let json_path = temp_dir.join("large_results.json");
 
         // 1. Export CSV in background thread (simulating export_csv task spawn)
-        let snapshot = app.results.clone();
+        let snapshot = app.results.snapshot();
         let (sender, receiver) = std::sync::mpsc::channel();
         let path_clone = csv_path.clone();
         let t_start = Instant::now();
@@ -3764,7 +3697,7 @@ mod tests {
         assert_eq!(line_count, COUNT + 1);
 
         // 2. Export JSON in background thread
-        let json_snapshot = app.results.clone();
+        let json_snapshot = app.results.snapshot();
         let total_json = json_snapshot.len();
         let (sender_json, receiver_json) = std::sync::mpsc::channel();
         let json_path_clone = json_path.clone();

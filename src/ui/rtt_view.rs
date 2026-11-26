@@ -93,10 +93,10 @@ fn percentile(sorted: &[f64], pct: f64) -> f64 {
 }
 
 /// Вычисляет статистику задержек и распределение по корзинам из списка результатов.
-pub fn calculate_rtt_stats(results: &[ScanResult]) -> Option<RttStats> {
+pub fn calculate_rtt_stats<'a>(results: impl IntoIterator<Item = &'a ScanResult>) -> Option<RttStats> {
     // Open|Filtered means no UDP response; the timeout is not a measured RTT.
     let mut latencies: Vec<f64> = results
-        .iter()
+        .into_iter()
         .filter(|r| r.state == PortState::Open)
         .map(|r| r.rtt.as_secs_f64() * 1000.0)
         .collect();
