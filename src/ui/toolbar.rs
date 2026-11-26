@@ -37,7 +37,11 @@ fn summary(value: &str, limit: usize) -> String {
 }
 
 fn field(ui: &mut Ui, label: &str, value: &str, fallback: &str, limit: usize) {
-    let value = if value.trim().is_empty() { fallback } else { value };
+    let value = if value.trim().is_empty() {
+        fallback
+    } else {
+        value
+    };
     ui.label(RichText::new(format!("{label}: {}", summary(value, limit))).small())
         .on_hover_text(value);
 }
@@ -60,7 +64,11 @@ fn controls(app: &mut App, ui: &mut Ui, lang: Language) {
             Ok(_) => format!("{}+Enter", crate::ui::cmd_key_name()),
             Err(error) => error.to_owned(),
         };
-        if ui.add_enabled(can_start, start).on_hover_text(hint).clicked() {
+        if ui
+            .add_enabled(can_start, start)
+            .on_hover_text(hint)
+            .clicked()
+        {
             commands::execute(app, ui.ctx(), AppCommand::StartScan);
         }
 
@@ -75,7 +83,11 @@ fn controls(app: &mut App, ui: &mut Ui, lang: Language) {
             },
             can_stop,
         );
-        if ui.add_enabled(can_stop, stop).on_hover_text("Esc").clicked() {
+        if ui
+            .add_enabled(can_stop, stop)
+            .on_hover_text("Esc")
+            .clicked()
+        {
             commands::execute(app, ui.ctx(), AppCommand::StopScan);
         }
         ui.separator();
@@ -83,17 +95,37 @@ fn controls(app: &mut App, ui: &mut Ui, lang: Language) {
         let cmd = crate::ui::cmd_key_name();
         ui.add_enabled_ui(!app.is_running(), |ui| {
             ui.menu_button(lang.text("Profile", "Профиль"), |ui| {
-                menu_action(ui, app, &format!("{} ({cmd}+O)", lang.text("Load", "Загрузить")), AppCommand::LoadProfile);
-                menu_action(ui, app, &format!("{} ({cmd}+S)", lang.text("Save", "Сохранить")), AppCommand::SaveProfile);
+                menu_action(
+                    ui,
+                    app,
+                    &format!("{} ({cmd}+O)", lang.text("Load", "Загрузить")),
+                    AppCommand::LoadProfile,
+                );
+                menu_action(
+                    ui,
+                    app,
+                    &format!("{} ({cmd}+S)", lang.text("Save", "Сохранить")),
+                    AppCommand::SaveProfile,
+                );
             });
         });
         let can_export = commands::available(app, AppCommand::ExportCsv);
         ui.add_enabled_ui(can_export, |ui| {
             ui.menu_button(lang.text("Export", "Экспорт"), |ui| {
                 menu_action(ui, app, &format!("CSV ({cmd}+E)"), AppCommand::ExportCsv);
-                menu_action(ui, app, &format!("JSON ({cmd}+Shift+E)"), AppCommand::ExportJson);
+                menu_action(
+                    ui,
+                    app,
+                    &format!("JSON ({cmd}+Shift+E)"),
+                    AppCommand::ExportJson,
+                );
                 menu_action(ui, app, "HTML", AppCommand::ExportHtml);
-            }).response.on_hover_text(lang.text("Export all stored results, ignoring filters", "Экспорт всех сохранённых результатов, без учёта фильтров"));
+            })
+            .response
+            .on_hover_text(lang.text(
+                "Export all stored results, ignoring filters",
+                "Экспорт всех сохранённых результатов, без учёта фильтров",
+            ));
         });
         if app.is_exporting() {
             ui.spinner();
@@ -125,15 +157,31 @@ fn context(app: &App, ui: &mut Ui, lang: Language) {
         &draft
     };
     ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new(if running {
-            lang.text("Active scan", "Активное сканирование")
-        } else {
-            lang.text("Next scan", "Следующее сканирование")
-        }).strong().small());
-        field(ui, lang.text("Bind IP", "Локальный IP"), &current.bind, lang.text("Automatic", "Авто"), 28);
+        ui.label(
+            RichText::new(if running {
+                lang.text("Active scan", "Активное сканирование")
+            } else {
+                lang.text("Next scan", "Следующее сканирование")
+            })
+            .strong()
+            .small(),
+        );
+        field(
+            ui,
+            lang.text("Bind IP", "Локальный IP"),
+            &current.bind,
+            lang.text("Automatic", "Авто"),
+            28,
+        );
         field(ui, lang.text("Targets", "Цели"), &current.targets, "—", 42);
         field(ui, lang.text("Ports", "Порты"), &current.ports, "—", 30);
-        field(ui, lang.text("Exclusions", "Исключения"), &current.exclusions, "—", 18);
+        field(
+            ui,
+            lang.text("Exclusions", "Исключения"),
+            &current.exclusions,
+            "—",
+            18,
+        );
         ui.label(match current.protocol {
             ScanProtocol::Tcp => "TCP",
             ScanProtocol::Udp => "UDP",
@@ -147,16 +195,24 @@ fn context(app: &App, ui: &mut Ui, lang: Language) {
         };
         ui.horizontal_wrapped(|ui| {
             ui.label(components::status_text(ui, label, level));
-            ui.add(egui::ProgressBar::new(app.progress_fraction()).desired_width(120.0).show_percentage());
+            ui.add(
+                egui::ProgressBar::new(app.progress_fraction())
+                    .desired_width(120.0)
+                    .show_percentage(),
+            );
             ui.label(RichText::new(app.progress_text()).small());
         });
     } else if app.total_probes > 0 {
-        ui.label(RichText::new(format!(
-            "{}: {}/{}",
-            lang.text("Last scan probes", "Последнее сканирование: проверок"),
-            app.done_probes,
-            app.total_probes
-        )).small().weak());
+        ui.label(
+            RichText::new(format!(
+                "{}: {}/{}",
+                lang.text("Last scan probes", "Последнее сканирование: проверок"),
+                app.done_probes,
+                app.total_probes
+            ))
+            .small()
+            .weak(),
+        );
     }
 }
 

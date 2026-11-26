@@ -384,7 +384,10 @@ fn render_grouped_by_host(app: &mut App, ui: &mut Ui) {
                                 app.results_filter = group.ip_text.clone();
                             }
                             if ui
-                                .add_enabled(!app.is_running(), egui::Button::new("🎯 Scan Host").small())
+                                .add_enabled(
+                                    !app.is_running(),
+                                    egui::Button::new("🎯 Scan Host").small(),
+                                )
                                 .clicked()
                             {
                                 app.targets_input = group.ip_text.clone();

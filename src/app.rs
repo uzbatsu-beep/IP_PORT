@@ -1528,9 +1528,13 @@ impl App {
             });
 
         let load_requested = !text_input_focused
-            && ui.input(|i| is_cmd(&i.modifiers) && !i.modifiers.shift && i.key_pressed(egui::Key::O));
+            && ui.input(|i| {
+                is_cmd(&i.modifiers) && !i.modifiers.shift && i.key_pressed(egui::Key::O)
+            });
         let save_requested = !text_input_focused
-            && ui.input(|i| is_cmd(&i.modifiers) && !i.modifiers.shift && i.key_pressed(egui::Key::S));
+            && ui.input(|i| {
+                is_cmd(&i.modifiers) && !i.modifiers.shift && i.key_pressed(egui::Key::S)
+            });
         for (requested, action) in [
             (start_requested, AppCommand::StartScan),
             (stop_requested, AppCommand::StopScan),
