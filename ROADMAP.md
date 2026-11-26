@@ -311,8 +311,11 @@ Shared components, semantic status colors, reusable panel surfaces and table met
 | UI-03.4 | Discovery modes, catalog-backed presets, Knowledge Service, ScopePreview, v0.5.0 preparation | Merged; manual acceptance pending |
 | UI-03.5 | Virtualized Devices/Ports, filters, selection, evidence, catalog integrity | Merged; manual acceptance pending |
 | ENG-01.A | Development infrastructure and pinned toolchain | Merged; CI passed |
-| ENG-01.B | Quality & Performance Pipeline | In PR; CI pending |
-| ENG-01.C | ResultsStore / ResultsProjection / SelectionState | Approved; after B |
+| ENG-01.B | Quality & Performance Pipeline | Merged; CI passed |
+| ENG-01.C1 | Encapsulated ResultsStore, revisions, stable EndpointId | In PR; Windows-first CI pending |
+| ENG-01.C2 | ResultsProjection extraction, preserve algorithms | Approved; after C1 |
+| ENG-01.C3 | Typed SelectionState | Approved; after C2 |
+| ENG-01.C4 | Integration and live performance QA | Approved; after C3 |
 | ENG-01.D | Engineering acceptance | Approved; after C |
 | UI-03.6 | Universal inspector and evidence sections | Planned; after ENG-01 |
 | UI-03.7 | Complete status bar and RU/EN localization | Planned |

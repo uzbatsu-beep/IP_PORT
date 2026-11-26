@@ -21,6 +21,14 @@ class ReleaseGateTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 select_run(runs, SHA)
 
+    def test_cross_platform_requires_exact_dispatch_and_gate(self):
+        self.assertEqual(select_run([run(event="workflow_dispatch")], SHA, "workflow_dispatch")["id"], 1)
+        with self.assertRaises(ValueError):
+            select_run([run()], SHA, "workflow_dispatch")
+        with self.assertRaises(ValueError):
+            require_gate([{"name": "Quality Gate", "status": "completed", "conclusion": "success"}], "Cross-platform Gate")
+        require_gate([{"name": "Cross-platform Gate", "status": "completed", "conclusion": "success"}], "Cross-platform Gate")
+
     def test_newest_failed_run_blocks_old_success(self):
         with self.assertRaises(ValueError):
             select_run([run(), run(id=2, conclusion="failure")], SHA)

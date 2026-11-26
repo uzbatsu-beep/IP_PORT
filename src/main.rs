@@ -7,6 +7,7 @@ mod knowledge_service;
 mod oui_registry;
 mod oui_store;
 mod profile;
+mod results;
 mod scanner;
 mod ui;
 

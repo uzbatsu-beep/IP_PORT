@@ -89,7 +89,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 ui.label(format!(
                     "{} {}",
                     language.text("Stored:", "Сохранено:"),
-                    app.results.len()
+                    app.results().len()
                 ));
                 if !app.status.is_empty() {
                     ui.label(RichText::new(&app.status).small().weak());
@@ -143,7 +143,7 @@ fn inspector(app: &App, ui: &mut Ui, language: Language) {
     components::section_heading(ui, language.text("Device inspector", "Карточка устройства"));
     let Some(index) = app
         .selected_result
-        .filter(|&index| index < app.results.len())
+        .filter(|&index| index < app.results().len())
     else {
         ui.label(
             RichText::new(language.text(
@@ -240,7 +240,7 @@ mod tests {
         select_section(&mut app, Section::Settings);
         select_section(&mut app, Section::Discovery);
         assert_eq!(app.targets_input, targets);
-        assert_eq!(app.results.len(), 1);
+        assert_eq!(app.results().len(), 1);
         assert_eq!(app.selected_result, Some(0));
     }
 
@@ -274,7 +274,7 @@ mod tests {
                     output.textures_delta.clear();
                     assert!(!output.shapes.is_empty());
                     assert_eq!(app.selected_result, Some(0));
-                    assert_eq!(app.results.len(), 1);
+                    assert_eq!(app.results().len(), 1);
                 }
             }
         }

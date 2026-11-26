@@ -24,6 +24,7 @@
 
 | DEC-014 | 2026-11-26: UI-03.5 утверждён | Свёрнутые по умолчанию группы, виртуализация Devices/Ports, AND-фильтры, расширенные столбцы, единый выбор узла/порта, явная достоверность, нагрузочный тест 100000 результатов, плотность UI-05; аудит целостности каталога. |
 | DEC-015 | 2026-11-26: ENG-01 утверждён | Rust 1.100.0 / MSRV 1.95.0, locked builds, preflight, CI/Performance QA, Cargo Audit/Deny, Dependabot, AGENTS.md, Quality Gate/Rulesets; выделить ResultsStore, ResultsProjection, SelectionState; этапы A–D перед UI-03.6. [ENGINEERING.md](ENGINEERING.md) |
+| DEC-016 | 2026-11-26: ENG-01.C утверждён | C1–C4: инкапсулированное хранилище, staged projection, типизированный выбор и стабильные EndpointId, Live Performance QA; замена get_if_addrs отдельным PR. Windows-first CI; Linux/macOS сборки отложены до финальной приёмки и релиза. |
 
 ## Изучить до внедрения
 

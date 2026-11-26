@@ -329,7 +329,7 @@ fn summary(app: &App, ui: &mut Ui) {
 
             components::metric_row(ui, "Probes", probes, false);
 
-            components::metric_row(ui, "Stored open results", app.results.len(), true);
+            components::metric_row(ui, "Stored open results", app.results().len(), true);
 
             components::metric_row(ui, "Open probes", app.probe_counts.open, false);
 
@@ -357,9 +357,9 @@ fn summary(app: &App, ui: &mut Ui) {
 
             components::metric_row(ui, "Other errors", app.probe_counts.errors, false);
 
-            if app.dropped_open_results > 0 {
+            if app.results().dropped() > 0 {
                 ui.label(RichText::new("Not stored (limit)").color(theme::warning(ui)));
-                ui.label(app.dropped_open_results.to_string());
+                ui.label(app.results().dropped().to_string());
                 ui.end_row();
             }
         });

@@ -299,3 +299,8 @@ UI-03.5 extends App's cached result view with ResultFilters, independent host so
 ## ENG-01 foundation
 
 [ENGINEERING.md](ENGINEERING.md) defines the staged engineering plan. A changes toolchain, validation and documentation only. C will extract ResultsStore, ResultsProjection and typed SelectionState from App while preserving existing raw observations, scope validation, profile v1, export and scan lifecycle. No decomposition is claimed completed by A.
+
+
+## ENG-01.C1 — ResultsStore (DEC-016)
+
+`src/results/store.rs` owns a single vector of immutable ResultRow values (raw ScanResult and derived display strings), bounded to 100,000 observations. No second live ScanResult vector. App coordinates accepted events, host enrichment, cache invalidation and export; immutable slices/iterators feed projection, and export creates an owned snapshot on demand. A generation/index EndpointId identifies individual observations including duplicate IP/port; clearing invalidates previous generations. Revision increments for accepted observations and clear, not rejected overflow. RTT cache uses the revision. Existing index-based projection remains in App until C2; selection conversion to IDs is C3. Scanner protocol, profile v1, evidence and exports are unchanged. Windows-first CI during development; deferred Linux/macOS checks at acceptance.

@@ -28,7 +28,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         }
         if ui
             .add_enabled(
-                !app.results.is_empty(),
+                !app.results().is_empty(),
                 components::secondary_button(lang.text("Clear results", "Очистить результаты")),
             )
             .on_hover_text(lang.text(
@@ -76,7 +76,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             app.host_groups().len(),
             lang.text("Endpoints shown", "Порты в выборке"),
             app.visible_indices().len(),
-            app.results.len()
+            app.results().len()
         ));
         if app.view_mode == ResultsViewMode::GroupedByHost
             && ui
@@ -108,7 +108,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             });
     }
     if app.visible_indices().is_empty() {
-        let msg = if app.results.is_empty() {
+        let msg = if app.results().is_empty() {
             if app.is_stopping() {
                 lang.text("Stopping…", "Остановка…")
             } else if app.is_running() {
@@ -488,7 +488,7 @@ fn render_devices(app: &mut App, ui: &mut Ui, lang: Language) {
                                     .to_owned();
                                 let ambiguous = info.is_some_and(|i| i.neighbor_ambiguous);
                                 let selected = app.selected_result.is_some_and(|idx| {
-                                    app.results.get(idx).is_some_and(|result| result.ip == ip)
+                                    app.results().get(idx).is_some_and(|result| result.ip == ip)
                                 });
                                 row.set_selected(selected);
                                 let mut toggle = false;

@@ -21,7 +21,7 @@ pub fn available(app: &mut App, action: AppCommand) -> bool {
         AppCommand::StopScan => app.is_running() && !app.is_stopping(),
         AppCommand::LoadProfile | AppCommand::SaveProfile => !app.is_running(),
         AppCommand::ExportCsv | AppCommand::ExportJson | AppCommand::ExportHtml => {
-            !app.results.is_empty() && !app.is_exporting()
+            !app.results().is_empty() && !app.is_exporting()
         }
         AppCommand::OpenSettings | AppCommand::ToggleTheme => true,
     }
