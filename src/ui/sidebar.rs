@@ -10,6 +10,37 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     ui.label(RichText::new("Async TCP & UDP port scanner").weak());
     ui.add_space(12.0);
 
+    egui::CollapsingHeader::new("Appearance")
+        .default_open(false)
+        .show(ui, |ui| {
+            let previous = app.appearance;
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut app.appearance.theme, theme::Theme::Light, "Light");
+                ui.selectable_value(&mut app.appearance.theme, theme::Theme::Dark, "Dark");
+            });
+            egui::ComboBox::from_id_salt("appearance_palette")
+                .selected_text(app.appearance.palette.label())
+                .show_ui(ui, |ui| {
+                    for palette in theme::Palette::ALL {
+                        ui.selectable_value(&mut app.appearance.palette, palette, palette.label());
+                    }
+                });
+            let reset = ui.button("Reset appearance").clicked();
+            if reset {
+                app.appearance = theme::Appearance::default();
+            }
+            if previous != app.appearance || reset {
+                app.save_appearance(ui.ctx());
+            }
+            if let Some(error) = &app.appearance_error {
+                ui.label(RichText::new(error).color(theme::error(ui)).small());
+                if ui.button("Retry save").clicked() {
+                    app.save_appearance(ui.ctx());
+                }
+            }
+        });
+    ui.add_space(8.0);
+
     let running = app.is_running();
     let stopping = app.is_stopping();
     ui.add_enabled_ui(!running, |ui| {
@@ -257,11 +288,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                             "PTR exceeded warning threshold: {} total · {} still running",
                             app.host_info_stats.ptr_over_limit,
                             app.ptr_currently_overdue(),
-                        )).small().color(theme::WARNING));
+                        )).small().color(theme::warning(ui)));
                         ui.label(RichText::new("Soft deadline only; the OS resolver is allowed to finish.").small().weak());
                         if let Some(error) = &app.host_info_stats.last_ptr_error {
                             ui.label(RichText::new(format!("Last PTR error: {error}"))
-                                .small().color(theme::WARNING));
+                                .small().color(theme::warning(ui)));
                         }
                     }
                     if app.read_neighbor_cache {
@@ -274,7 +305,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         );
                         if let Some(error) = &app.host_info_stats.last_neighbor_error {
                             ui.label(RichText::new(format!("Neighbor cache: {error}"))
-                                .small().color(theme::WARNING));
+                                .small().color(theme::warning(ui)));
                         }
                     }
                 }
@@ -364,7 +395,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         let cmd = crate::ui::cmd_key_name();
         let can_start = !running && preview.is_ok();
         let start = egui::Button::new(RichText::new("Start scan").strong())
-            .fill(egui::Color32::from_rgb(0x2b, 0x7d, 0xd6));
+            .fill(ui.visuals().selection.bg_fill);
         let start_hover = match &preview {
             Ok(_) => format!("Begin scanning the configured targets and ports ({cmd}+Enter)"),
             Err(err) => err.clone(),
@@ -380,7 +411,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         let stop_label = if stopping { "Stopping..." } else { "Stop" };
         let mut stop_button = egui::Button::new(stop_label);
         if running && !stopping {
-            stop_button = stop_button.fill(theme::ERROR.gamma_multiply(0.28));
+            stop_button =
+                stop_button.fill(theme::tint(ui.visuals().panel_fill, theme::error(ui), 12));
         }
         if ui
             .add_enabled(running && !stopping, stop_button)
@@ -435,10 +467,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         ui.add_space(6.0);
         let status_text = match app.status_level {
             StatusLevel::Idle => RichText::new(&app.status).weak(),
-            StatusLevel::Running => RichText::new(&app.status).color(theme::ACCENT),
-            StatusLevel::Stopping => RichText::new(&app.status).color(theme::WARNING),
-            StatusLevel::Success => RichText::new(&app.status).color(theme::SUCCESS),
-            StatusLevel::Error => RichText::new(&app.status).color(theme::ERROR),
+            StatusLevel::Running => RichText::new(&app.status).color(theme::accent(ui)),
+            StatusLevel::Stopping => RichText::new(&app.status).color(theme::warning(ui)),
+            StatusLevel::Success => RichText::new(&app.status).color(theme::success(ui)),
+            StatusLevel::Error => RichText::new(&app.status).color(theme::error(ui)),
         };
         if let Some(path) = &app.last_export_path
             && app.status.starts_with("Saved ")
@@ -507,7 +539,7 @@ fn scope_feedback(preview: &Result<ScopePreview, String>, running: bool, ui: &mu
         }
         Ok(_) => {}
         Err(err) => {
-            ui.label(RichText::new(err).color(theme::ERROR).small());
+            ui.label(RichText::new(err).color(theme::error(ui)).small());
         }
     }
 }
@@ -546,7 +578,7 @@ fn summary(app: &App, preview: &Result<ScopePreview, String>, ui: &mut Ui) {
             ui.end_row();
 
             if app.probe_counts.open_filtered > 0 {
-                ui.label(RichText::new("Open|Filtered").color(theme::WARNING))
+                ui.label(RichText::new("Open|Filtered").color(theme::warning(ui)))
                     .on_hover_text(
                         "No response received (UDP service is silent or packet filtered by firewall)",
                     );
@@ -563,7 +595,7 @@ fn summary(app: &App, preview: &Result<ScopePreview, String>, ui: &mut Ui) {
             ui.end_row();
 
             if app.probe_counts.unreachable > 0 {
-                ui.label(RichText::new("Unreachable").color(theme::WARNING))
+                ui.label(RichText::new("Unreachable").color(theme::warning(ui)))
                     .on_hover_text(
                         "Network or host unreachable (e.g. IPv6 unrouted or disabled on host)",
                     );
@@ -576,7 +608,7 @@ fn summary(app: &App, preview: &Result<ScopePreview, String>, ui: &mut Ui) {
             ui.end_row();
 
             if app.dropped_open_results > 0 {
-                ui.label(RichText::new("Not stored (limit)").color(theme::WARNING));
+                ui.label(RichText::new("Not stored (limit)").color(theme::warning(ui)));
                 ui.label(app.dropped_open_results.to_string());
                 ui.end_row();
             }

@@ -192,3 +192,10 @@
 - 71 автоматический модульный и интеграционный тест, покрывающий сетевые операции, отмену, ошибки, GUI-состояние и нагрузочные сценарии (136 FPS на 20 000 результатов).
 - Автоматический CI/CD пайплайн в GitHub Actions для Windows, Linux и macOS с проверками форматирования (`cargo fmt --check`), линтинга (`cargo clippy --all-targets -- -D warnings`), тестов и MSRV (Rust 1.95.0).
 - Автоматизированная матричная сборка релизных пакетов и публикация на GitHub Releases с контрольными суммами SHA256.
+
+
+### UI-01 (unreleased)
+
+- Independent Light/Dark themes and eight accent palettes, immediate application and per-user JSON persistence.
+- Theme-aware scan controls, status labels, selection and notifications; RTT severity colors retain their existing meaning.
+- Default appearance recovery, visible persistence errors and retry/reset controls; no new dependencies or scanner changes.

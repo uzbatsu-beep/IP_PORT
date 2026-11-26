@@ -324,6 +324,9 @@ pub struct HostInfoStats {
 }
 
 pub struct App {
+    pub appearance: ui::theme::Appearance,
+    appearance_path: Option<PathBuf>,
+    pub appearance_error: Option<String>,
     pub targets_input: String,
     pub ports_input: String,
     pub bind_addr_input: String,
@@ -388,8 +391,17 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        ui::theme::apply(&cc.egui_ctx);
         let mut app = Self::default_state();
+        app.appearance_path = ui::theme::settings_path();
+        if let Some(path) = &app.appearance_path {
+            match ui::theme::load(path) {
+                Ok(appearance) => app.appearance = appearance,
+                Err(error) => app.appearance_error = Some(format!("Settings: {error}")),
+            }
+        } else {
+            app.appearance_error = Some("Settings directory is unavailable".to_owned());
+        }
+        ui::theme::apply_appearance(&cc.egui_ctx, app.appearance);
         app.start_oui_restore();
         app
     }
@@ -407,6 +419,9 @@ impl App {
         );
 
         Self {
+            appearance: ui::theme::Appearance::default(),
+            appearance_path: None,
+            appearance_error: None,
             targets_input,
             ports_input,
             bind_addr_input,
@@ -464,6 +479,16 @@ impl App {
             last_export_path: None,
             scroll_to_selected: false,
         }
+    }
+
+    pub fn save_appearance(&mut self, ctx: &egui::Context) {
+        ui::theme::apply_appearance(ctx, self.appearance);
+        self.appearance_error = match &self.appearance_path {
+            Some(path) => ui::theme::save(path, self.appearance)
+                .err()
+                .map(|error| format!("Cannot save appearance: {error}")),
+            None => Some("Settings directory is unavailable".to_owned()),
+        };
     }
 
     #[allow(dead_code)]
@@ -1315,15 +1340,10 @@ impl App {
                     };
 
                     egui::Frame::popup(ui.style())
-                        .fill(egui::Color32::from_rgba_premultiplied(
-                            0x25,
-                            0x2a,
-                            0x33,
-                            (alpha * 245.0) as u8,
-                        ))
+                        .fill(ui.visuals().window_fill.gamma_multiply(alpha))
                         .stroke(egui::Stroke::new(
                             1.0,
-                            ui::theme::ACCENT.gamma_multiply(alpha),
+                            ui::theme::accent(ui).gamma_multiply(alpha),
                         ))
                         .inner_margin(egui::Margin::symmetric(12, 8))
                         .corner_radius(egui::CornerRadius::same(6))
@@ -1331,17 +1351,12 @@ impl App {
                             ui.horizontal(|ui| {
                                 ui.label(
                                     egui::RichText::new("✔")
-                                        .color(ui::theme::SUCCESS.gamma_multiply(alpha))
+                                        .color(ui::theme::success(ui).gamma_multiply(alpha))
                                         .strong(),
                                 );
                                 ui.label(
                                     egui::RichText::new(&toast.message)
-                                        .color(egui::Color32::from_rgba_premultiplied(
-                                            0xd8,
-                                            0xdd,
-                                            0xe6,
-                                            (alpha * 255.0) as u8,
-                                        ))
+                                        .color(ui.visuals().text_color().gamma_multiply(alpha))
                                         .small(),
                                 );
                             });
