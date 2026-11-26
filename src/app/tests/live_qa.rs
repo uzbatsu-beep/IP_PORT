@@ -33,7 +33,12 @@ fn observation(index: usize) -> ScanResult {
     } else {
         "ssh"
     };
-    ScanResult::new(ip, port, service, Duration::from_micros((index % 5000 + 100) as u64))
+    ScanResult::new(
+        ip,
+        port,
+        service,
+        Duration::from_micros((index % 5000 + 100) as u64),
+    )
 }
 
 impl Harness {
@@ -70,14 +75,17 @@ impl Harness {
     }
 
     fn depth(&self) -> usize {
-        self.tx.as_ref().map_or(self.sent - self.consumed, |tx| QUEUE - tx.capacity())
+        self.tx
+            .as_ref()
+            .map_or(self.sent - self.consumed, |tx| QUEUE - tx.capacity())
     }
 
     fn send(&mut self, count: usize) {
         let tx = self.tx.as_ref().unwrap();
         assert!(count <= tx.capacity());
         for _ in 0..count {
-            tx.try_send(ScanEvent::Open(observation(self.next))).unwrap();
+            tx.try_send(ScanEvent::Open(observation(self.next)))
+                .unwrap();
             self.next += 1;
             self.sent += 1;
         }
@@ -90,7 +98,13 @@ impl Harness {
         let metrics_before = self.app.projection.metrics();
         self.app.live_probe = Some(LiveFrameProbe::default());
         let start = Instant::now();
-        let output = run_headless_frame(&mut self.app, &self.ctx, egui::vec2(1180.0, 760.0), 1.0, vec![]);
+        let output = run_headless_frame(
+            &mut self.app,
+            &self.ctx,
+            egui::vec2(1180.0, 760.0),
+            1.0,
+            vec![],
+        );
         let frame_ms = ms(start.elapsed());
         let probe = self.app.live_probe.take().unwrap();
         let data_events = before.min(MAX_EVENTS_PER_FRAME);
@@ -134,11 +148,18 @@ impl Harness {
             assert!(self.app.is_stopping());
         }
         // Send terminal before closing the data channel: queued hits must be drained first.
-        self.terminal.take().unwrap().send(ScanEvent::Finished {
-            done: self.sent,
-            cancelled,
-            counts: ProbeCounts { open: self.sent, ..ProbeCounts::default() },
-        }).unwrap();
+        self.terminal
+            .take()
+            .unwrap()
+            .send(ScanEvent::Finished {
+                done: self.sent,
+                cancelled,
+                counts: ProbeCounts {
+                    open: self.sent,
+                    ..ProbeCounts::default()
+                },
+            })
+            .unwrap();
         drop(self.tx.take());
         while self.app.is_running() {
             self.frame();
@@ -154,8 +175,15 @@ impl Harness {
 
     fn report(&self, id: &str, initial: usize) -> Value {
         assert_eq!(self.consumed, self.sent);
-        assert_eq!(initial + self.sent, self.app.results.len() + self.app.results.dropped() + self.cleared);
-        let mut times: Vec<f64> = self.samples.iter().map(|s| s["frame_ms"].as_f64().unwrap()).collect();
+        assert_eq!(
+            initial + self.sent,
+            self.app.results.len() + self.app.results.dropped() + self.cleared
+        );
+        let mut times: Vec<f64> = self
+            .samples
+            .iter()
+            .map(|s| s["frame_ms"].as_f64().unwrap())
+            .collect();
         let elapsed = times.iter().sum::<f64>();
         let mean = elapsed / times.len() as f64;
         times.sort_by(f64::total_cmp);
@@ -182,16 +210,27 @@ fn metadata(h: &mut Harness, ip: IpAddr) {
     h.app.host_info_worker = Some(HostInfoWorker::from_test_channels(requests, rx));
     h.app.host_info_pending.insert(ip);
     updates.send(HostInfoEvent::Started(ip)).unwrap();
-    updates.send(HostInfoEvent::Finished(ip, HostInfo {
-        hostname: Some("live-fixture.example".to_owned()),
-        mac: Some("00:11:22:33:44:55".to_owned()),
-        ptr_status: PtrStatus::Resolved,
-        ptr_duration_ms: Some(1),
-        ..HostInfo::default()
-    })).unwrap();
+    updates
+        .send(HostInfoEvent::Finished(
+            ip,
+            HostInfo {
+                hostname: Some("live-fixture.example".to_owned()),
+                mac: Some("00:11:22:33:44:55".to_owned()),
+                ptr_status: PtrStatus::Resolved,
+                ptr_duration_ms: Some(1),
+                ..HostInfo::default()
+            },
+        ))
+        .unwrap();
     h.frame();
-    assert_eq!(h.app.host_info().get(&ip).unwrap().hostname.as_deref(), Some("live-fixture.example"));
-    assert_eq!(h.app.host_info().get(&ip).unwrap().mac.as_deref(), Some("00:11:22:33:44:55"));
+    assert_eq!(
+        h.app.host_info().get(&ip).unwrap().hostname.as_deref(),
+        Some("live-fixture.example")
+    );
+    assert_eq!(
+        h.app.host_info().get(&ip).unwrap().mac.as_deref(),
+        Some("00:11:22:33:44:55")
+    );
     h.app.host_info_worker = None;
     h.app.host_info_pending.clear();
     h.app.host_info_backlog.clear();
@@ -211,15 +250,22 @@ fn live_performance_matrix_optimized() {
     }
     h.finish(false);
     reports.push(h.report("LIVE-01", 0));
+    drop(h);
 
     // LIVE-02: burst at actual queue capacity, followed by budget-limited drainage.
     let mut h = Harness::new(20_000, ResultsViewMode::Flat);
     h.send(QUEUE);
     assert_eq!(h.tx.as_ref().unwrap().capacity(), 0);
-    assert!(h.tx.as_ref().unwrap().try_send(ScanEvent::Open(observation(h.next))).is_err());
+    assert!(
+        h.tx.as_ref()
+            .unwrap()
+            .try_send(ScanEvent::Open(observation(h.next)))
+            .is_err()
+    );
     h.finish(false);
     assert_eq!(h.max_queue, QUEUE);
     reports.push(h.report("LIVE-02", 20_000));
+    drop(h);
 
     // LIVE-03: filter with known deterministic matching count during arrival.
     let mut h = Harness::new(20_000, ResultsViewMode::Flat);
@@ -227,11 +273,17 @@ fn live_performance_matrix_optimized() {
         h.app.projection.settings.results_filter = query.to_owned();
         h.send(256);
         h.frame();
-        let expected = h.app.results.iter().filter(|r| r.service.contains(query)).count();
+        let expected = h
+            .app
+            .results
+            .iter()
+            .filter(|r| r.service.contains(query))
+            .count();
         assert_eq!(h.app.visible_indices().len(), expected);
     }
     h.finish(false);
     reports.push(h.report("LIVE-03", 20_000));
+    drop(h);
 
     // LIVE-04: stable ordering by port in both directions during arrival.
     let mut h = Harness::new(50_000, ResultsViewMode::GroupedByHost);
@@ -248,6 +300,7 @@ fn live_performance_matrix_optimized() {
     }
     h.finish(false);
     reports.push(h.report("LIVE-04", 50_000));
+    drop(h);
 
     // LIVE-05: real enrichment event handling, deterministic injected resolver output.
     let mut h = Harness::new(20_000, ResultsViewMode::GroupedByHost);
@@ -261,6 +314,7 @@ fn live_performance_matrix_optimized() {
     assert_eq!(h.app.host_info_stats.completed, 1);
     h.finish(false);
     reports.push(h.report("LIVE-05", 20_000));
+    drop(h);
 
     // LIVE-06: stable identity, hidden filter, collapsed group, mode switches.
     let mut h = Harness::new(50_000, ResultsViewMode::GroupedByHost);
@@ -279,6 +333,7 @@ fn live_performance_matrix_optimized() {
     h.finish(false);
     assert_eq!(h.app.selected_endpoint_index(), Some(0));
     reports.push(h.report("LIVE-06", 50_000));
+    drop(h);
 
     // LIVE-07: capacity boundary and exact rejected count.
     let mut h = Harness::new(99_000, ResultsViewMode::Flat);
@@ -287,6 +342,7 @@ fn live_performance_matrix_optimized() {
     assert_eq!(h.app.results.len(), MAX_STORED_RESULTS);
     assert_eq!(h.app.results.dropped(), 3096);
     reports.push(h.report("LIVE-07", 99_000));
+    drop(h);
 
     // LIVE-08: cancellation with queued observations and terminal ordering.
     let mut h = Harness::new(20_000, ResultsViewMode::GroupedByHost);
@@ -295,6 +351,7 @@ fn live_performance_matrix_optimized() {
     h.finish(true);
     assert_eq!(h.app.selected_endpoint_index(), Some(0));
     reports.push(h.report("LIVE-08", 20_000));
+    drop(h);
 
     // LIVE-09: clear while scan is active, then new independent scan.
     let mut h = Harness::new(0, ResultsViewMode::GroupedByHost);
@@ -316,23 +373,35 @@ fn live_performance_matrix_optimized() {
     let (terminal, terminal_rx) = std::sync::mpsc::channel();
     let cancel = CancellationToken::new();
     let previous = h.app.results.id_at(0).unwrap();
-    h.app.start_scan_with(|_| Ok(ScanHandle::from_channels(rx, terminal_rx, cancel.clone())));
+    h.app
+        .start_scan_with(|_| Ok(ScanHandle::from_channels(rx, terminal_rx, cancel.clone())));
     assert!(h.app.is_running());
     assert!(h.app.results.is_empty());
     assert!(h.app.results.resolve(previous).is_none());
     tx.try_send(ScanEvent::Open(observation(999))).unwrap();
     drop(tx);
-    terminal.send(ScanEvent::Finished { done: 1, cancelled: false, counts: ProbeCounts { open: 1, ..ProbeCounts::default() } }).unwrap();
+    terminal
+        .send(ScanEvent::Finished {
+            done: 1,
+            cancelled: false,
+            counts: ProbeCounts {
+                open: 1,
+                ..ProbeCounts::default()
+            },
+        })
+        .unwrap();
     let _ = run_headless_frame(&mut h.app, &h.ctx, egui::vec2(1180.0, 760.0), 1.0, vec![]);
     assert_eq!(h.app.results.len(), 1);
     assert!(!h.app.is_running());
     assert!(h.app.results.resolve(previous).is_none());
     reports.push(report);
+    drop(h);
 
     // LIVE-10: actual background writer takes a snapshot before later arrivals.
     let mut h = Harness::new(1000, ResultsViewMode::Flat);
     h.app.projection.settings.results_filter = "missing".to_owned();
-    let path = std::env::temp_dir().join(format!("ip-port-live-export-{}.json", std::process::id()));
+    let path =
+        std::env::temp_dir().join(format!("ip-port-live-export-{}.json", std::process::id()));
     h.app.export_to_path(path.clone(), "json");
     h.send(256);
     h.frame();
@@ -349,13 +418,18 @@ fn live_performance_matrix_optimized() {
     assert_eq!(h.app.results.len(), 1256);
     assert_eq!(h.app.last_export_path.as_ref(), Some(&path));
     reports.push(h.report("LIVE-10", 1000));
+    drop(h);
 
     // LIVE-11: combined sustained load, changing filters/sort, mode, metadata and selection.
     let mut h = Harness::new(80_000, ResultsViewMode::GroupedByHost);
     h.app.select_endpoint(0);
     let ip = h.app.selected_host().unwrap();
     for i in 0..24 {
-        h.app.view_mode = if i % 2 == 0 { ResultsViewMode::GroupedByHost } else { ResultsViewMode::Flat };
+        h.app.view_mode = if i % 2 == 0 {
+            ResultsViewMode::GroupedByHost
+        } else {
+            ResultsViewMode::Flat
+        };
         h.app.projection.settings.sort_ascending = i % 3 == 0;
         h.app.projection.settings.results_filter = if i % 3 == 0 { "http" } else { "" }.to_owned();
         h.send(1024);
@@ -369,6 +443,7 @@ fn live_performance_matrix_optimized() {
     h.finish(true);
     assert_eq!(h.app.results.len(), MAX_STORED_RESULTS);
     reports.push(h.report("LIVE-11", 80_000));
+    drop(h);
 
     let report = json!({
         "schema_version": 1, "profile": if cfg!(debug_assertions) { "debug" } else { "release" },
