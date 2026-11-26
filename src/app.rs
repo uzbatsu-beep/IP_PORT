@@ -9,10 +9,19 @@ use crate::oui_store::{ImportedOui, RestoredOui};
 #[cfg(test)]
 use crate::results::store::MAX_STORED_RESULTS;
 pub use crate::results::store::ResultRow;
-use crate::results::store::{ResultsStore, contains_ascii_case_insensitive};
-use crate::scanner::{
-    self, PortState, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
+use crate::results::grouping::HostGroup;
+use crate::results::projection::ResultsProjection;
+use crate::results::store::ResultsStore;
+pub use crate::results::{
+    filters::ResultFilters,
+    grouping::DeviceRow,
+    sorting::{HostSort, SortColumn},
 };
+use crate::scanner::{
+    self, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
+};
+#[cfg(test)]
+use crate::scanner::PortState;
 use crate::scanner::{scope::Exclusions, targets};
 use crate::ui;
 
@@ -20,115 +29,10 @@ use crate::ui;
 pub const MAX_EVENTS_PER_FRAME: usize = 1024;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SortColumn {
-    #[default]
-    Address,
-    Port,
-    Service,
-    Latency,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ResultsViewMode {
     #[default]
     Flat,
     GroupedByHost,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ResultFilters {
-    pub vendor: String,
-    pub service: String,
-    pub transport: Option<ScanProtocol>,
-    pub state: Option<PortState>,
-    pub evidence: Option<bool>,
-}
-impl ResultFilters {
-    fn matches(
-        &self,
-        row: &ResultRow,
-        info: Option<&HostInfo>,
-        vendor: &str,
-        service: &str,
-    ) -> bool {
-        (vendor.is_empty()
-            || info
-                .and_then(|i| i.vendor.as_deref())
-                .is_some_and(|v| contains_ascii_case_insensitive(v, vendor)))
-            && (service.is_empty() || contains_ascii_case_insensitive(&row.raw.service, service))
-            && self.transport.is_none_or(|v| v == row.raw.protocol)
-            && self.state.is_none_or(|v| v == row.raw.state)
-            && self
-                .evidence
-                .is_none_or(|v| v == (row.raw.service_verified && row.raw.state == PortState::Open))
-    }
-}
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum HostSort {
-    #[default]
-    Address,
-    Vendor,
-    Endpoints,
-    Rtt,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DeviceRow {
-    Host(usize),
-    Endpoint(usize),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct HostGroup {
-    pub ip: IpAddr,
-    pub ip_text: String,
-    pub indices: Vec<usize>,
-    pub ports_count: usize,
-    pub services_summary: String,
-    pub min_rtt: Duration,
-    pub has_measured_rtt: bool,
-}
-
-impl HostGroup {
-    pub fn build(ip: IpAddr, indices: Vec<usize>, rows: &[ResultRow]) -> Self {
-        let ip_text = ip.to_string();
-        let ports_count = indices.len();
-        let confirmed_rtt = indices
-            .iter()
-            .filter(|&&idx| rows[idx].raw.state == PortState::Open)
-            .map(|&idx| rows[idx].raw.rtt)
-            .min();
-        let min_rtt = confirmed_rtt.unwrap_or_default();
-
-        let mut distinct_services: Vec<&str> = Vec::new();
-        for &idx in &indices {
-            let svc = rows[idx].raw.service.as_str();
-            if svc != "unknown" && !distinct_services.contains(&svc) {
-                distinct_services.push(svc);
-            }
-        }
-
-        let services_summary = if distinct_services.is_empty() {
-            "unknown".to_owned()
-        } else if distinct_services.len() <= 3 {
-            distinct_services.join(", ")
-        } else {
-            format!(
-                "{}, +{} more",
-                distinct_services[..3].join(", "),
-                distinct_services.len() - 3
-            )
-        };
-
-        Self {
-            ip,
-            ip_text,
-            indices,
-            ports_count,
-            services_summary,
-            min_rtt,
-            has_measured_rtt: confirmed_rtt.is_some(),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -338,7 +242,7 @@ pub struct App {
     pub oui_registry: OuiRegistry,
     pub oui_status: String,
     oui_task: Option<OuiTask>,
-    pub host_info: HashMap<IpAddr, HostInfo>,
+    host_info: HashMap<IpAddr, HostInfo>,
     host_info_pending: HashSet<IpAddr>,
     host_info_backlog: VecDeque<IpAddr>,
     host_info_inflight: HashMap<IpAddr, Instant>,
@@ -355,14 +259,8 @@ pub struct App {
     pub status: String,
     pub status_level: StatusLevel,
     results: ResultsStore,
-    pub results_filter: String,
-    pub filters: ResultFilters,
-    pub host_sort: HostSort,
-    pub host_sort_ascending: bool,
+    pub projection: ResultsProjection,
     pub selected_host_only: bool,
-    expanded_hosts: HashSet<IpAddr>,
-    pub sort_column: SortColumn,
-    pub sort_ascending: bool,
     pub selected_result: Option<usize>,
     pub view_mode: ResultsViewMode,
 
@@ -374,19 +272,8 @@ pub struct App {
     pub toasts: Vec<Toast>,
     scan_started_at: Option<Instant>,
 
-    visible_indices: Vec<usize>,
-    host_groups: Vec<HostGroup>,
-    device_rows: Vec<DeviceRow>,
-    device_rows_dirty: bool,
-    cached_filters: ResultFilters,
-    cached_host_sort: (HostSort, bool),
     cached_rtt_stats: Option<crate::ui::rtt_view::RttStats>,
     cached_rtt_revision: Option<u64>,
-    cached_filter: String,
-    cached_sort_column: SortColumn,
-    cached_sort_ascending: bool,
-    view_dirty: bool,
-    view_rebuilds: usize,
 
     input_cache: InputCache,
     scan: Option<ScanHandle>,
@@ -460,14 +347,8 @@ impl App {
             status: String::new(),
             status_level: StatusLevel::Idle,
             results: ResultsStore::default(),
-            results_filter: String::new(),
-            filters: ResultFilters::default(),
-            host_sort: HostSort::Address,
-            host_sort_ascending: true,
+            projection: ResultsProjection::default(),
             selected_host_only: false,
-            expanded_hosts: HashSet::new(),
-            sort_column: SortColumn::Address,
-            sort_ascending: true,
             selected_result: None,
             view_mode: ResultsViewMode::Flat,
             target_count: 0,
@@ -477,19 +358,8 @@ impl App {
             probe_counts: ProbeCounts::default(),
             toasts: Vec::new(),
             scan_started_at: None,
-            visible_indices: Vec::new(),
-            host_groups: Vec::new(),
-            device_rows: Vec::new(),
-            device_rows_dirty: true,
-            cached_filters: ResultFilters::default(),
-            cached_host_sort: (HostSort::Address, true),
             cached_rtt_stats: None,
             cached_rtt_revision: None,
-            cached_filter: String::new(),
-            cached_sort_column: SortColumn::Address,
-            cached_sort_ascending: true,
-            view_dirty: false,
-            view_rebuilds: 0,
             input_cache,
             scan: None,
             spawner: scanner::spawn,
@@ -678,7 +548,6 @@ impl App {
             self.host_info_backlog.push_back(ip);
             self.flush_host_info_backlog();
         }
-        self.view_dirty = true;
     }
 
     fn start_host_enrichment(&mut self) {
@@ -865,7 +734,7 @@ impl App {
                 .as_deref()
                 .and_then(|mac| self.oui_registry.lookup(mac));
         }
-        self.view_dirty = true;
+        self.projection.invalidate_metadata();
     }
 
     fn drain_host_enrichment(&mut self, ctx: &egui::Context) {
@@ -916,7 +785,7 @@ impl App {
                         self.host_info_stats.last_neighbor_error = Some(message.clone());
                     }
                     self.host_info.insert(ip, info);
-                    self.view_dirty = true;
+                    self.projection.invalidate_metadata();
                 }
             }
         }
@@ -943,155 +812,28 @@ impl App {
     }
 
     pub fn ensure_results_view(&mut self) {
-        let filter_changed =
-            self.cached_filter != self.results_filter || self.cached_filters != self.filters;
-        let host_sort_changed = self.cached_host_sort != (self.host_sort, self.host_sort_ascending);
-        let sort_changed = self.cached_sort_column != self.sort_column
-            || self.cached_sort_ascending != self.sort_ascending;
-
-        if !self.view_dirty && !filter_changed && !sort_changed && !host_sort_changed {
-            return;
-        }
-
-        let query_lower = self.results_filter.trim().to_ascii_lowercase();
-        let vendor_filter = self.filters.vendor.trim().to_ascii_lowercase();
-        let service_filter = self.filters.service.trim().to_ascii_lowercase();
-        self.visible_indices.clear();
-        for (idx, row) in self.results.rows().iter().enumerate() {
-            let info_matches =
-                self.host_info.get(&row.raw.ip).is_some_and(|info| {
-                    info.hostname
-                        .as_deref()
-                        .is_some_and(|value| contains_ascii_case_insensitive(value, &query_lower))
-                        || info.mac.as_deref().is_some_and(|value| {
-                            contains_ascii_case_insensitive(value, &query_lower)
-                        })
-                        || info.vendor.as_deref().is_some_and(|value| {
-                            contains_ascii_case_insensitive(value, &query_lower)
-                        })
-                });
-            if (row.matches_lowercase_query(&query_lower) || info_matches)
-                && self.filters.matches(
-                    row,
-                    self.host_info.get(&row.raw.ip),
-                    &vendor_filter,
-                    &service_filter,
-                )
-            {
-                self.visible_indices.push(idx);
-            }
-        }
-
-        let rows = self.results.rows();
-        let sort_column = self.sort_column;
-        let sort_ascending = self.sort_ascending;
-        self.visible_indices.sort_by(|&a_idx, &b_idx| {
-            let a = &rows[a_idx].raw;
-            let b = &rows[b_idx].raw;
-            let ordering = match sort_column {
-                SortColumn::Address => a.ip.cmp(&b.ip).then_with(|| a.port.cmp(&b.port)),
-                SortColumn::Port => a.port.cmp(&b.port).then_with(|| a.ip.cmp(&b.ip)),
-                SortColumn::Service => a
-                    .service
-                    .cmp(&b.service)
-                    .then_with(|| a.ip.cmp(&b.ip))
-                    .then_with(|| a.port.cmp(&b.port)),
-                SortColumn::Latency => a
-                    .rtt
-                    .cmp(&b.rtt)
-                    .then_with(|| a.ip.cmp(&b.ip))
-                    .then_with(|| a.port.cmp(&b.port)),
-            };
-
-            if sort_ascending {
-                ordering
-            } else {
-                ordering.reverse()
-            }
-        });
-
-        self.cached_filter.clear();
-        self.cached_filter.push_str(&self.results_filter);
-        self.cached_filters = self.filters.clone();
-        self.cached_host_sort = (self.host_sort, self.host_sort_ascending);
-        self.cached_sort_column = self.sort_column;
-        self.cached_sort_ascending = self.sort_ascending;
-        self.view_dirty = false;
-        self.view_rebuilds += 1;
-
-        // Keep display order while using O(1) average lookup for each unique host.
-        let mut groups_map: Vec<(IpAddr, Vec<usize>)> = Vec::new();
-        let mut host_indices = std::collections::HashMap::<IpAddr, usize>::new();
-        for &idx in &self.visible_indices {
-            let ip = self.results.rows()[idx].raw.ip;
-            if let Some(&group_idx) = host_indices.get(&ip) {
-                groups_map[group_idx].1.push(idx);
-            } else {
-                host_indices.insert(ip, groups_map.len());
-                groups_map.push((ip, vec![idx]));
-            }
-        }
-        self.host_groups = groups_map
-            .into_iter()
-            .map(|(ip, indices)| HostGroup::build(ip, indices, self.results.rows()))
-            .collect();
-        let info = &self.host_info;
-        let sort = self.host_sort;
-        let ascending = self.host_sort_ascending;
-        self.host_groups.sort_by(|a, b| {
-            let vendor = |ip: IpAddr| {
-                info.get(&ip)
-                    .and_then(|i| i.vendor.as_deref())
-                    .unwrap_or("")
-            };
-            let order = match sort {
-                HostSort::Address => a.ip.cmp(&b.ip),
-                HostSort::Vendor => vendor(a.ip).cmp(vendor(b.ip)),
-                HostSort::Endpoints => a.ports_count.cmp(&b.ports_count),
-                HostSort::Rtt => {
-                    (!a.has_measured_rtt, a.min_rtt).cmp(&(!b.has_measured_rtt, b.min_rtt))
-                }
-            }
-            .then_with(|| a.ip.cmp(&b.ip));
-            if ascending { order } else { order.reverse() }
-        });
-        self.device_rows_dirty = true;
+        self.projection.ensure(&self.results, &self.host_info);
     }
 
     pub fn ensure_device_rows(&mut self) {
-        self.ensure_results_view();
-        if !self.device_rows_dirty {
-            return;
-        }
-        self.device_rows.clear();
-        for (index, group) in self.host_groups.iter().enumerate() {
-            self.device_rows.push(DeviceRow::Host(index));
-            if self.expanded_hosts.contains(&group.ip) {
-                self.device_rows
-                    .extend(group.indices.iter().copied().map(DeviceRow::Endpoint));
-            }
-        }
-        self.device_rows_dirty = false;
+        self.projection
+            .ensure_device_rows(&self.results, &self.host_info);
     }
 
     pub fn device_rows(&self) -> &[DeviceRow] {
-        &self.device_rows
+        self.projection.device_rows()
     }
 
     pub fn host_expanded(&self, ip: IpAddr) -> bool {
-        self.expanded_hosts.contains(&ip)
+        self.projection.host_expanded(ip)
     }
 
     pub fn toggle_host(&mut self, ip: IpAddr) {
-        if !self.expanded_hosts.remove(&ip) {
-            self.expanded_hosts.insert(ip);
-        }
-        self.device_rows_dirty = true;
+        self.projection.toggle_host(ip);
     }
 
     pub fn collapse_hosts(&mut self) {
-        self.expanded_hosts.clear();
-        self.device_rows_dirty = true;
+        self.projection.collapse_hosts();
     }
 
     pub fn select_endpoint(&mut self, index: usize) {
@@ -1100,7 +842,7 @@ impl App {
     }
 
     pub fn select_host(&mut self, group_index: usize) {
-        let group = &self.host_groups[group_index];
+        let group = &self.host_groups()[group_index];
         if !self.selected_result.is_some_and(|idx| {
             self.results
                 .rows()
@@ -1117,15 +859,14 @@ impl App {
         let ip = self.results.rows().get(index)?.raw.ip;
         if !self.selected_host_only
             && self.host_expanded(ip)
-            && let Some(pos) = self
-                .device_rows
+            && let Some(pos) = self.device_rows()
                 .iter()
                 .position(|row| *row == DeviceRow::Endpoint(index))
         {
             return Some(pos);
         }
-        self.device_rows.iter().position(|row| match row {
-            DeviceRow::Host(group) => self.host_groups[*group].ip == ip,
+        self.device_rows().iter().position(|row| match row {
+            DeviceRow::Host(group) => self.host_groups()[*group].ip == ip,
             DeviceRow::Endpoint(_) => false,
         })
     }
@@ -1140,16 +881,20 @@ impl App {
         self.cached_rtt_stats.clone()
     }
 
+    pub fn host_info(&self) -> &HashMap<IpAddr, HostInfo> {
+        &self.host_info
+    }
+
     pub fn results(&self) -> &ResultsStore {
         &self.results
     }
 
     pub fn visible_indices(&self) -> &[usize] {
-        &self.visible_indices
+        self.projection.visible_indices()
     }
 
     pub fn host_groups(&self) -> &[HostGroup] {
-        &self.host_groups
+        self.projection.host_groups()
     }
 
     pub fn row(&self, index: usize) -> &ResultRow {
@@ -1158,7 +903,7 @@ impl App {
 
     #[cfg(test)]
     pub fn view_rebuilds(&self) -> usize {
-        self.view_rebuilds
+        self.projection.metrics().view_rebuilds
     }
 
     pub fn progress_fraction(&self) -> f32 {
@@ -1399,11 +1144,7 @@ impl App {
 
     pub(crate) fn clear_results_storage(&mut self) {
         self.results.clear();
-        self.visible_indices.clear();
-        self.host_groups.clear();
-        self.device_rows.clear();
-        self.expanded_hosts.clear();
-        self.device_rows_dirty = true;
+        self.projection.clear(&self.results);
         self.selected_host_only = false;
         self.host_info.clear();
         self.host_info_pending.clear();
@@ -1415,7 +1156,6 @@ impl App {
         self.cached_rtt_stats = None;
         self.cached_rtt_revision = None;
         self.selected_result = None;
-        self.view_dirty = false;
     }
 
     pub fn set_status(&mut self, level: StatusLevel, status: String) {
@@ -1695,7 +1435,7 @@ impl App {
             && (arrow_down || arrow_up || home_pressed || end_pressed)
         {
             self.ensure_device_rows();
-            let len = self.device_rows.len();
+            let len = self.device_rows().len();
             if len > 0 {
                 let pos = self.selected_device_position();
                 let next = if home_pressed {
@@ -1707,51 +1447,49 @@ impl App {
                 } else {
                     pos.map_or(len - 1, |p| p.saturating_sub(1))
                 };
-                match self.device_rows[next] {
+                match self.device_rows()[next] {
                     DeviceRow::Host(group) => self.select_host(group),
                     DeviceRow::Endpoint(index) => self.select_endpoint(index),
                 }
                 self.scroll_to_selected = true;
             }
         } else {
-            if arrow_down && !self.visible_indices.is_empty() {
+            if arrow_down && !self.visible_indices().is_empty() {
                 let next_index = match self.selected_result {
-                    None => self.visible_indices[0],
+                    None => self.visible_indices()[0],
                     Some(current) => {
-                        let pos = self
-                            .visible_indices
+                        let pos = self.visible_indices()
                             .iter()
                             .position(|&idx| idx == current)
                             .unwrap_or(0);
-                        let next_pos = (pos + 1).min(self.visible_indices.len() - 1);
-                        self.visible_indices[next_pos]
+                        let next_pos = (pos + 1).min(self.visible_indices().len() - 1);
+                        self.visible_indices()[next_pos]
                     }
                 };
                 self.select_endpoint(next_index);
                 self.scroll_to_selected = true;
             }
-            if arrow_up && !self.visible_indices.is_empty() {
+            if arrow_up && !self.visible_indices().is_empty() {
                 let prev_index = match self.selected_result {
-                    None => *self.visible_indices.last().unwrap(),
+                    None => *self.visible_indices().last().unwrap(),
                     Some(current) => {
-                        let pos = self
-                            .visible_indices
+                        let pos = self.visible_indices()
                             .iter()
                             .position(|&idx| idx == current)
                             .unwrap_or(0);
                         let prev_pos = pos.saturating_sub(1);
-                        self.visible_indices[prev_pos]
+                        self.visible_indices()[prev_pos]
                     }
                 };
                 self.select_endpoint(prev_index);
                 self.scroll_to_selected = true;
             }
-            if home_pressed && !self.visible_indices.is_empty() {
-                self.select_endpoint(self.visible_indices[0]);
+            if home_pressed && !self.visible_indices().is_empty() {
+                self.select_endpoint(self.visible_indices()[0]);
                 self.scroll_to_selected = true;
             }
-            if end_pressed && !self.visible_indices.is_empty() {
-                self.select_endpoint(*self.visible_indices.last().unwrap());
+            if end_pressed && !self.visible_indices().is_empty() {
+                self.select_endpoint(*self.visible_indices().last().unwrap());
                 self.scroll_to_selected = true;
             }
         }
@@ -1875,7 +1613,7 @@ mod tests {
         let (tx, _terminal_tx, cancel) = attach_mock_scan(&mut app);
         app.push_result(sample_result(1, 80, "http", 1));
         app.selected_result = Some(0);
-        app.results_filter = "http".to_owned();
+        app.projection.settings.results_filter = "http".to_owned();
         let targets = app.targets_input.clone();
         let ctx = egui::Context::default();
         crate::ui::theme::apply(&ctx);
@@ -1893,7 +1631,7 @@ mod tests {
             assert!(app.is_running());
             assert!(!cancel.is_cancelled());
             assert_eq!(app.selected_result, Some(0));
-            assert_eq!(app.results_filter, "http");
+            assert_eq!(app.projection.settings.results_filter, "http");
             assert_eq!(app.targets_input, targets);
             assert!(!tx.is_closed());
             assert_eq!(app.results.len(), index + 2);
@@ -2130,13 +1868,13 @@ mod tests {
         app.ensure_results_view();
         assert_eq!(app.view_rebuilds(), 1);
 
-        app.results_filter = "HTTP".to_owned();
+        app.projection.settings.results_filter = "HTTP".to_owned();
         app.ensure_results_view();
         assert_eq!(app.view_rebuilds(), 2);
         assert_eq!(app.visible_indices().len(), 2);
 
-        app.sort_column = SortColumn::Latency;
-        app.sort_ascending = false;
+        app.projection.settings.sort_column = SortColumn::Latency;
+        app.projection.settings.sort_ascending = false;
         app.ensure_results_view();
         assert_eq!(app.view_rebuilds(), 3);
         let first = app.row(app.visible_indices()[0]).raw.port;
@@ -2206,13 +1944,13 @@ mod tests {
         assert_eq!(g1.services_summary, "ssh");
 
         // Filter by 10.0.0.2
-        app.results_filter = "10.0.0.2".to_owned();
+        app.projection.settings.results_filter = "10.0.0.2".to_owned();
         app.ensure_results_view();
         assert_eq!(app.host_groups().len(), 1);
         assert_eq!(app.host_groups()[0].ip_text, "10.0.0.2");
 
         // Switch to GroupedByHost
-        app.results_filter.clear();
+        app.projection.settings.results_filter.clear();
         app.view_mode = ResultsViewMode::GroupedByHost;
         app.ensure_results_view();
 
@@ -2421,8 +2159,8 @@ mod tests {
             ));
         }
 
-        app.results_filter = "http".to_owned();
-        app.sort_column = SortColumn::Latency;
+        app.projection.settings.results_filter = "http".to_owned();
+        app.projection.settings.sort_column = SortColumn::Latency;
         app.ensure_results_view();
         assert_eq!(app.view_rebuilds(), 1);
         assert!(!app.visible_indices().is_empty());
@@ -2645,7 +2383,7 @@ mod tests {
         assert!(ctx.memory(|m| m.has_focus(egui::Id::unique("results_filter"))));
 
         // 6. Escape while filter has focus clears filter
-        app.results_filter = "test-query".to_owned();
+        app.projection.settings.results_filter = "test-query".to_owned();
         run_headless_frame(
             &mut app,
             &ctx,
@@ -2662,7 +2400,7 @@ mod tests {
                 },
             ],
         );
-        assert!(app.results_filter.is_empty());
+        assert!(app.projection.settings.results_filter.is_empty());
 
         // 7. Arrow keys navigate results table
         app.selected_result = None;
@@ -2970,11 +2708,11 @@ mod tests {
         }
         assert_eq!(app.view_rebuilds(), rebuilds);
         assert_eq!(app.selected_result, Some(3));
-        app.filters.transport = Some(ScanProtocol::Udp);
+        app.projection.settings.filters.transport = Some(ScanProtocol::Udp);
         app.ensure_device_rows();
         assert!(app.device_rows().is_empty());
         assert_eq!(app.results.len(), MAX_STORED_RESULTS);
-        app.filters = ResultFilters::default();
+        app.projection.settings.filters = ResultFilters::default();
         app.ensure_device_rows();
         assert_eq!(app.device_rows().len(), 10_010);
         assert_eq!(app.selected_result, Some(3));
@@ -3058,16 +2796,16 @@ mod tests {
             let projection_ms = ms(start.elapsed());
             assert_eq!(app.device_rows().len(), count / 10);
             let start = Instant::now();
-            app.sort_column = SortColumn::Latency;
-            app.sort_ascending = false;
+            app.projection.settings.sort_column = SortColumn::Latency;
+            app.projection.settings.sort_ascending = false;
             app.ensure_results_view();
             let sort_ms = ms(start.elapsed());
             let start = Instant::now();
-            app.results_filter = "http".to_owned();
+            app.projection.settings.results_filter = "http".to_owned();
             app.ensure_results_view();
             let filter_ms = ms(start.elapsed());
             assert_eq!(app.visible_indices().len(), count / 10);
-            app.results_filter.clear();
+            app.projection.settings.results_filter.clear();
             app.ensure_device_rows();
             app.toggle_host(app.host_groups()[0].ip);
             app.ensure_device_rows();
@@ -3080,6 +2818,7 @@ mod tests {
                 let ctx = egui::Context::default();
                 crate::ui::theme::apply(&ctx);
                 let rebuilds = app.view_rebuilds();
+                let projection_before = app.projection.metrics();
                 let mut warmup_ms = Vec::with_capacity(5);
                 let mut frame_ms = Vec::with_capacity(60);
                 let mut max_shapes = 0;
@@ -3096,6 +2835,7 @@ mod tests {
                     }
                 }
                 assert_eq!(app.view_rebuilds(), rebuilds);
+                assert_eq!(app.projection.metrics(), projection_before);
                 assert!(max_shapes < 5000, "Virtualized draw must stay bounded");
                 let mean = frame_ms.iter().sum::<f64>() / frame_ms.len() as f64;
                 let mut sorted = frame_ms.clone();
@@ -3122,6 +2862,7 @@ mod tests {
                     "min_ms": sorted[0],
                     "max_ms": sorted[59],
                     "max_shapes": max_shapes,
+                    "projection_metrics": app.projection.metrics(),
                     "rss_bytes": process_rss_bytes(),
                     "within_target": within_target,
                     "timing_gate_required": count == 20_000
@@ -3159,13 +2900,13 @@ mod tests {
             Duration::ZERO,
             false,
         ));
-        app.filters.service = "HTTP".to_owned();
-        app.filters.transport = Some(ScanProtocol::Udp);
-        app.filters.state = Some(PortState::OpenFiltered);
-        app.filters.evidence = Some(false);
+        app.projection.settings.filters.service = "HTTP".to_owned();
+        app.projection.settings.filters.transport = Some(ScanProtocol::Udp);
+        app.projection.settings.filters.state = Some(PortState::OpenFiltered);
+        app.projection.settings.filters.evidence = Some(false);
         app.ensure_device_rows();
         assert_eq!(app.visible_indices(), &[1]);
-        app.filters.evidence = Some(true);
+        app.projection.settings.filters.evidence = Some(true);
         app.ensure_device_rows();
         assert!(app.visible_indices().is_empty());
         assert_eq!(app.results.len(), 2);
@@ -3228,20 +2969,20 @@ mod tests {
         let initial_build_duration = t_sort_start.elapsed();
 
         let t_sort_latency = Instant::now();
-        app.sort_column = SortColumn::Latency;
-        app.sort_ascending = false;
+        app.projection.settings.sort_column = SortColumn::Latency;
+        app.projection.settings.sort_ascending = false;
         app.ensure_results_view();
         let sort_latency_duration = t_sort_latency.elapsed();
 
         // 3. Measure search / filtering across 20 000 items
         let t_filter_start = Instant::now();
-        app.results_filter = "http".to_owned();
+        app.projection.settings.results_filter = "http".to_owned();
         app.ensure_results_view();
         let filter_duration = t_filter_start.elapsed();
         let filtered_count = app.visible_indices().len();
         assert!(filtered_count > 0 && filtered_count < COUNT as usize);
 
-        app.results_filter.clear();
+        app.projection.settings.results_filter.clear();
         app.ensure_results_view();
 
         // 4. Measure cold start and a fixed warm-up separately from steady state.

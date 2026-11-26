@@ -42,7 +42,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     });
     ui.horizontal_wrapped(|ui| {
         let response = ui.add(
-            egui::TextEdit::singleline(&mut app.results_filter)
+            egui::TextEdit::singleline(&mut app.projection.settings.results_filter)
                 .id(egui::Id::unique("results_filter"))
                 .desired_width(220.0)
                 .hint_text(lang.text(
@@ -53,14 +53,14 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         if (response.has_focus() || response.lost_focus())
             && ui.input(|i| i.key_pressed(egui::Key::Escape))
         {
-            app.results_filter.clear();
+            app.projection.settings.results_filter.clear();
         }
         if ui
             .small_button(lang.text("Reset filters", "Сброс фильтров"))
             .clicked()
         {
-            app.results_filter.clear();
-            app.filters = ResultFilters::default();
+            app.projection.settings.results_filter.clear();
+            app.projection.settings.filters = ResultFilters::default();
         }
     });
     egui::CollapsingHeader::new(lang.text("Filters", "Фильтры"))
@@ -143,51 +143,51 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 fn filters(app: &mut App, ui: &mut Ui, lang: Language) {
     ui.horizontal_wrapped(|ui| {
         ui.label(lang.text("OUI owner", "Владелец OUI"));
-        ui.add(egui::TextEdit::singleline(&mut app.filters.vendor).desired_width(120.0));
+        ui.add(egui::TextEdit::singleline(&mut app.projection.settings.filters.vendor).desired_width(120.0));
         ui.label(lang.text("Service", "Сервис"));
-        ui.add(egui::TextEdit::singleline(&mut app.filters.service).desired_width(100.0));
+        ui.add(egui::TextEdit::singleline(&mut app.projection.settings.filters.service).desired_width(100.0));
     });
     ui.horizontal_wrapped(|ui| {
         let all = lang.text("All", "Все");
         egui::ComboBox::from_id_salt("filter_transport")
-            .selected_text(app.filters.transport.map_or(all, ScanProtocol::as_str))
+            .selected_text(app.projection.settings.filters.transport.map_or(all, ScanProtocol::as_str))
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut app.filters.transport, None, all);
+                ui.selectable_value(&mut app.projection.settings.filters.transport, None, all);
                 for protocol in [ScanProtocol::Tcp, ScanProtocol::Udp] {
                     ui.selectable_value(
-                        &mut app.filters.transport,
+                        &mut app.projection.settings.filters.transport,
                         Some(protocol),
                         protocol.as_str(),
                     );
                 }
             });
         egui::ComboBox::from_id_salt("filter_state")
-            .selected_text(app.filters.state.map_or(all, PortState::as_str))
+            .selected_text(app.projection.settings.filters.state.map_or(all, PortState::as_str))
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut app.filters.state, None, all);
+                ui.selectable_value(&mut app.projection.settings.filters.state, None, all);
                 for state in [PortState::Open, PortState::OpenFiltered] {
-                    ui.selectable_value(&mut app.filters.state, Some(state), state.as_str());
+                    ui.selectable_value(&mut app.projection.settings.filters.state, Some(state), state.as_str());
                 }
             });
         egui::ComboBox::from_id_salt("filter_evidence")
-            .selected_text(match app.filters.evidence {
+            .selected_text(match app.projection.settings.filters.evidence {
                 None => lang.text("Any evidence", "Любая достоверность"),
                 Some(true) => lang.text("Service verified", "Сервис подтверждён"),
                 Some(false) => lang.text("Unverified", "Не подтверждён"),
             })
             .show_ui(ui, |ui| {
                 ui.selectable_value(
-                    &mut app.filters.evidence,
+                    &mut app.projection.settings.filters.evidence,
                     None,
                     lang.text("Any evidence", "Любая достоверность"),
                 );
                 ui.selectable_value(
-                    &mut app.filters.evidence,
+                    &mut app.projection.settings.filters.evidence,
                     Some(true),
                     lang.text("Service verified", "Сервис подтверждён"),
                 );
                 ui.selectable_value(
-                    &mut app.filters.evidence,
+                    &mut app.projection.settings.filters.evidence,
                     Some(false),
                     lang.text("Unverified", "Не подтверждён"),
                 );
@@ -302,8 +302,8 @@ fn host_details(info: &crate::host_info::HostInfo, ptr_deadline: u64) -> String 
 }
 
 fn render_ports(app: &mut App, ui: &mut Ui, lang: Language) {
-    let mut sort = app.sort_column;
-    let mut ascending = app.sort_ascending;
+    let mut sort = app.projection.settings.sort_column;
+    let mut ascending = app.projection.settings.sort_ascending;
     let len = app.visible_indices().len();
     egui::ScrollArea::horizontal()
         .id_salt("ports_horizontal")
@@ -369,7 +369,7 @@ fn render_ports(app: &mut App, ui: &mut Ui, lang: Language) {
                             app.selected_result == Some(index) && !app.selected_host_only,
                         );
                         row.col(|ui| {
-                            let info = app.host_info.get(&entry.raw.ip);
+                            let info = app.host_info().get(&entry.raw.ip);
                             let address = info.and_then(|i| i.hostname.as_deref()).map_or_else(
                                 || entry.ip_text.clone(),
                                 |name| format!("{} {name}", entry.ip_text),
@@ -392,14 +392,14 @@ fn render_ports(app: &mut App, ui: &mut Ui, lang: Language) {
                     });
                 });
         });
-    app.sort_column = sort;
-    app.sort_ascending = ascending;
+    app.projection.settings.sort_column = sort;
+    app.projection.settings.sort_ascending = ascending;
 }
 
 fn render_devices(app: &mut App, ui: &mut Ui, lang: Language) {
     let len = app.device_rows().len();
-    let mut sort = app.host_sort;
-    let mut ascending = app.host_sort_ascending;
+    let mut sort = app.projection.settings.host_sort;
+    let mut ascending = app.projection.settings.host_sort_ascending;
     egui::ScrollArea::horizontal()
         .id_salt("devices_horizontal")
         .show(ui, |ui| {
@@ -473,7 +473,7 @@ fn render_devices(app: &mut App, ui: &mut Ui, lang: Language) {
                                 } else {
                                     "—".to_owned()
                                 };
-                                let info = app.host_info.get(&ip);
+                                let info = app.host_info().get(&ip);
                                 let name = info
                                     .and_then(|i| i.hostname.as_deref())
                                     .unwrap_or("—")
@@ -504,7 +504,7 @@ fn render_devices(app: &mut App, ui: &mut Ui, lang: Language) {
                                         let address = format!("{ip_text} {name}");
                                         let response =
                                             ui.add(egui::Label::new(&address).truncate());
-                                        if let Some(info) = app.host_info.get(&ip) {
+                                        if let Some(info) = app.host_info().get(&ip) {
                                             response.on_hover_text(host_details(
                                                 info,
                                                 app.ptr_soft_deadline_ms,
@@ -577,7 +577,7 @@ fn render_devices(app: &mut App, ui: &mut Ui, lang: Language) {
                                         .button(lang.text("Filter by IP", "Фильтр по IP"))
                                         .clicked()
                                     {
-                                        app.results_filter = ip_text.clone();
+                                        app.projection.settings.results_filter = ip_text.clone();
                                         ui.close();
                                     }
                                     if ui
@@ -653,6 +653,6 @@ fn render_devices(app: &mut App, ui: &mut Ui, lang: Language) {
                     });
                 });
         });
-    app.host_sort = sort;
-    app.host_sort_ascending = ascending;
+    app.projection.settings.host_sort = sort;
+    app.projection.settings.host_sort_ascending = ascending;
 }

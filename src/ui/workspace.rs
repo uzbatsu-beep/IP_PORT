@@ -155,7 +155,7 @@ fn inspector(app: &App, ui: &mut Ui, language: Language) {
         return;
     };
     let row = app.row(index);
-    let info = app.host_info.get(&row.raw.ip);
+    let info = app.host_info().get(&row.raw.ip);
     let unavailable = language.text("Not observed", "Нет наблюдения");
     ui.label(RichText::new(&row.ip_text).monospace().strong());
     ui.label(
