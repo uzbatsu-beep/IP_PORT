@@ -289,7 +289,11 @@ fn host_details(info: &crate::host_info::HostInfo, ptr_deadline: u64) -> String 
         let _ = write!(text, "\nNeighbor-cache error: {reason}");
     }
     if !info.neighbor_interfaces.is_empty() {
-        let _ = write!(text, "\nNeighbor interfaces:\n{}", info.neighbor_interfaces.join("\n"));
+        let _ = write!(
+            text,
+            "\nNeighbor interfaces:\n{}",
+            info.neighbor_interfaces.join("\n")
+        );
     }
     if info.neighbor_ambiguous {
         text.push_str("\nAmbiguous neighbor records; MAC not attributed");
@@ -366,14 +370,14 @@ fn render_ports(app: &mut App, ui: &mut Ui, lang: Language) {
                         );
                         row.col(|ui| {
                             let info = app.host_info.get(&entry.raw.ip);
-                            let address = info
-                                .and_then(|i| i.hostname.as_deref())
-                                .map_or_else(|| entry.ip_text.clone(), |name| {
-                                    format!("{} {name}", entry.ip_text)
-                                });
+                            let address = info.and_then(|i| i.hostname.as_deref()).map_or_else(
+                                || entry.ip_text.clone(),
+                                |name| format!("{} {name}", entry.ip_text),
+                            );
                             let response = ui.add(egui::Label::new(&address).truncate());
                             if let Some(info) = info {
-                                response.on_hover_text(host_details(info, app.ptr_soft_deadline_ms));
+                                response
+                                    .on_hover_text(host_details(info, app.ptr_soft_deadline_ms));
                             } else {
                                 response.on_hover_text(&address);
                             }
