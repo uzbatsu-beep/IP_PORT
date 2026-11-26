@@ -383,7 +383,10 @@ fn render_grouped_by_host(app: &mut App, ui: &mut Ui) {
                             if ui.small_button("🔍 Filter").clicked() {
                                 app.results_filter = group.ip_text.clone();
                             }
-                            if ui.small_button("🎯 Scan Host").clicked() {
+                            if ui
+                                .add_enabled(!app.is_running(), egui::Button::new("🎯 Scan Host").small())
+                                .clicked()
+                            {
                                 app.targets_input = group.ip_text.clone();
                                 app.ports_input = "1-1024".to_owned();
                                 app.show_toast(format!(

@@ -285,3 +285,6 @@ The egui composition moves to `src/ui/workspace.rs`. App retains network task li
 
 
 UI-03.2 adds typed routes in navigation.rs, original vector icons in icons.rs, route rendering in views.rs, and independent language preferences. Shared App owns the network engine and continues polling regardless of route. The bundled JSON protocol catalog is read-only and has no dependency on scanner probe dispatch. See [INDUSTRIAL_PROTOCOLS.md](INDUSTRIAL_PROTOCOLS.md).
+
+
+UI-03.3 centralizes application actions in `ui/commands.rs`. Toolbar and keyboard handlers use identical state guards; route-local reports call the same dispatcher. `ui/toolbar.rs` renders the global two-level panel using shared App state and a snapshot of successfully spawned scan inputs. Scanner and export lifecycles remain independent of the active route.

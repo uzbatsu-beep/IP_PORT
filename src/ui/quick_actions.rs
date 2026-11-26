@@ -238,7 +238,10 @@ pub fn show_row_context_menu(app: &mut App, entry: &ResultRow, ui: &mut egui::Ui
     }
 
     if ui
-        .button(format!("🎯 Set as scan target ({})", entry.ip_text))
+        .add_enabled(
+            !app.is_running(),
+            egui::Button::new(format!("🎯 Set as scan target ({})", entry.ip_text)),
+        )
         .on_hover_text(
             "Puts this IP in the Targets field and sets ports to 1-1024 for deep scanning",
         )
@@ -322,7 +325,7 @@ pub fn show_inspector_toolbar(app: &mut App, entry_idx: usize, ui: &mut Ui) {
             }
 
             if ui
-                .small_button("🎯 Scan Host")
+                .add_enabled(!app.is_running(), egui::Button::new("🎯 Scan Host").small())
                 .on_hover_text("Load this IP as target with ports 1-1024")
                 .clicked()
             {

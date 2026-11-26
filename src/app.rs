@@ -324,6 +324,7 @@ pub struct HostInfoStats {
 }
 
 pub struct App {
+    pub active_scan_context: Option<ui::toolbar::ScanContext>,
     pub workspace: ui::workspace::Workspace,
     pub appearance: ui::theme::Appearance,
     appearance_path: Option<PathBuf>,
@@ -422,6 +423,7 @@ impl App {
         );
 
         Self {
+            active_scan_context: None,
             workspace: ui::workspace::Workspace::default(),
             appearance: ui::theme::Appearance::default(),
             appearance_path: None,
@@ -623,6 +625,7 @@ impl App {
             ),
         );
 
+        self.active_scan_context = Some(ui::toolbar::ScanContext::from_app(self));
         self.scan = Some(handle);
     }
 
@@ -1504,6 +1507,8 @@ impl App {
         let processed = self.drain_events_with_budget(MAX_EVENTS_PER_FRAME);
         self.drain_host_enrichment(ui.ctx());
 
+        use ui::commands::{self, AppCommand};
+
         let is_cmd = |m: &egui::Modifiers| m.command || m.ctrl || m.mac_cmd;
         let command = ui.input(|i| is_cmd(&i.modifiers));
         let text_input_focused = ui.ctx().egui_wants_keyboard_input();
@@ -1522,17 +1527,21 @@ impl App {
                 is_cmd(&i.modifiers) && i.modifiers.shift && i.key_pressed(egui::Key::E)
             });
 
-        if start_requested && self.can_start_scan() {
-            self.start_scan();
-        }
-        if stop_requested && self.is_running() {
-            self.stop_scan();
-        }
-        if export_csv_requested && !self.results.is_empty() {
-            self.export_csv();
-        }
-        if export_json_requested && !self.results.is_empty() {
-            self.export_json();
+        let load_requested = !text_input_focused
+            && ui.input(|i| is_cmd(&i.modifiers) && !i.modifiers.shift && i.key_pressed(egui::Key::O));
+        let save_requested = !text_input_focused
+            && ui.input(|i| is_cmd(&i.modifiers) && !i.modifiers.shift && i.key_pressed(egui::Key::S));
+        for (requested, action) in [
+            (start_requested, AppCommand::StartScan),
+            (stop_requested, AppCommand::StopScan),
+            (export_csv_requested, AppCommand::ExportCsv),
+            (export_json_requested, AppCommand::ExportJson),
+            (load_requested, AppCommand::LoadProfile),
+            (save_requested, AppCommand::SaveProfile),
+        ] {
+            if requested {
+                commands::execute(self, ui.ctx(), action);
+            }
         }
         if copy_requested
             && let Some(index) = self.selected_result
@@ -1686,6 +1695,37 @@ mod tests {
         let (_terminal_tx, terminal_rx) = std::sync::mpsc::channel();
         let cancel = CancellationToken::new();
         Ok(ScanHandle::from_channels(rx, terminal_rx, cancel))
+    }
+
+    #[test]
+    fn dispatcher_guards_scan_lifecycle_across_routes() {
+        use crate::ui::commands::{self, AppCommand};
+        use crate::ui::navigation::Section;
+
+        let mut app = App::default_state();
+        let ctx = egui::Context::default();
+        app.set_spawner(mock_infinite_scan);
+        app.workspace.section = Section::Knowledge;
+        commands::execute(&mut app, &ctx, AppCommand::StartScan);
+        assert!(app.is_running());
+        let context = app.active_scan_context.clone().unwrap();
+        for section in Section::ALL {
+            app.workspace.section = section;
+            assert!(!commands::available(&mut app, AppCommand::StartScan));
+            assert!(!commands::available(&mut app, AppCommand::LoadProfile));
+            assert!(!commands::available(&mut app, AppCommand::SaveProfile));
+            assert!(commands::available(&mut app, AppCommand::StopScan));
+            commands::execute(&mut app, &ctx, AppCommand::StartScan);
+            assert_eq!(app.active_scan_context.as_ref(), Some(&context));
+        }
+        app.push_result(sample_result(1, 80, "http", 1));
+        assert!(commands::available(&mut app, AppCommand::ExportCsv));
+        commands::execute(&mut app, &ctx, AppCommand::StopScan);
+        assert!(app.is_stopping());
+        assert!(!commands::available(&mut app, AppCommand::StopScan));
+        assert!(!commands::available(&mut app, AppCommand::StartScan));
+        assert_eq!(app.results.len(), 1);
+        assert!(commands::available(&mut app, AppCommand::ExportHtml));
     }
 
     #[test]

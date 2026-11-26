@@ -1,6 +1,7 @@
 //! Routes reuse existing application services rather than owning scanner state.
 use egui::{RichText, Ui};
 
+use super::commands::{self, AppCommand};
 use super::{components, knowledge, navigation::Section, rtt_view, sidebar};
 use crate::app::App;
 
@@ -39,16 +40,16 @@ pub fn show(section: Section, app: &mut App, ui: &mut Ui) {
                     "Export all stored results (not the filter).",
                     "Экспорт всех сохранённых результатов без учёта фильтра.",
                 ));
-                let enabled = !app.results.is_empty() && !app.is_exporting();
-                ui.add_enabled_ui(enabled, |ui| {
-                    if ui.button("CSV").clicked() {
-                        app.export_csv();
-                    }
-                    if ui.button("JSON").clicked() {
-                        app.export_json();
-                    }
-                    if ui.button("HTML").clicked() {
-                        app.export_html();
+                ui.horizontal_wrapped(|ui| {
+                    for (label, action) in [
+                        ("CSV", AppCommand::ExportCsv),
+                        ("JSON", AppCommand::ExportJson),
+                        ("HTML", AppCommand::ExportHtml),
+                    ] {
+                        let enabled = commands::available(app, action);
+                        if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                            commands::execute(app, ui.ctx(), action);
+                        }
                     }
                 });
                 if app.is_exporting() {

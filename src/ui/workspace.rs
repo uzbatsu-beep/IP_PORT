@@ -4,7 +4,7 @@ use egui::{RichText, Ui};
 use crate::app::{App, ResultsViewMode, StatusLevel};
 use crate::ui::navigation::Section;
 pub use crate::ui::preferences::Language;
-use crate::ui::{components, navigation, preferences, results, sidebar, views};
+use crate::ui::{components, navigation, preferences, results, sidebar, toolbar, views};
 
 #[derive(Default)]
 pub struct Workspace {
@@ -56,38 +56,27 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     let wide = wide_layout(ui.available_width() - if app.workspace.expanded { 132.0 } else { 0.0 });
     let language = app.workspace.language;
 
-    egui::Panel::top("workspace_header")
-        .resizable(false)
-        .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("IP_PORT").strong());
-                ui.separator();
-                ui.label(language.text("Engineering Workbench", "Инженерная станция"));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.selectable_value(&mut app.workspace.language, Language::Russian, "RU");
-                    ui.selectable_value(&mut app.workspace.language, Language::English, "EN");
-                    ui.label(language.text("Shell language", "Язык оболочки"));
-                });
-            });
-        });
-
-    if app.workspace.language != language {
-        app.workspace.save_language();
-        ui.ctx().request_repaint();
-    }
+    toolbar::show(app, ui);
 
     egui::Panel::bottom("workspace_status")
         .resizable(false)
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                let state = match app.status_level {
+                let level = if app.is_stopping() {
+                    StatusLevel::Stopping
+                } else if app.is_running() {
+                    StatusLevel::Running
+                } else {
+                    app.status_level
+                };
+                let state = match level {
                     StatusLevel::Idle => language.text("Ready", "Готово"),
                     StatusLevel::Running => language.text("Scanning", "Сканирование"),
                     StatusLevel::Stopping => language.text("Stopping", "Остановка"),
                     StatusLevel::Success => language.text("Completed", "Завершено"),
                     StatusLevel::Error => language.text("Error", "Ошибка"),
                 };
-                ui.label(components::status_text(ui, state, app.status_level));
+                ui.label(components::status_text(ui, state, level));
                 ui.separator();
                 ui.label(format!(
                     "{} {}/{}",
@@ -109,25 +98,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 
     if let Some(section) = navigation::show(app, ui) {
         select_section(app, section);
-    }
-
-    if app.workspace.section != Section::Discovery && app.is_running() {
-        egui::Panel::top("workspace_running")
-            .resizable(false)
-            .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(app.progress_text());
-                    let stopping = app.is_stopping();
-                    let stop = components::danger_button(
-                        ui,
-                        language.text("Stop scan", "Остановить"),
-                        !stopping,
-                    );
-                    if ui.add_enabled(!stopping, stop).clicked() {
-                        app.stop_scan();
-                    }
-                });
-            });
     }
 
     if app.workspace.section == Section::Discovery {
