@@ -1101,10 +1101,12 @@ impl App {
 
     pub fn select_host(&mut self, group_index: usize) {
         let group = &self.host_groups[group_index];
-        if !self
-            .selected_result
-            .is_some_and(|idx| self.results.rows().get(idx).is_some_and(|r| r.raw.ip == group.ip))
-        {
+        if !self.selected_result.is_some_and(|idx| {
+            self.results
+                .rows()
+                .get(idx)
+                .is_some_and(|r| r.raw.ip == group.ip)
+        }) {
             self.selected_result = group.indices.first().copied();
         }
         self.selected_host_only = true;

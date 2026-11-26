@@ -95,15 +95,24 @@ impl ResultsStore {
             index: self.rows.len(),
         };
         self.rows.push(ResultRow::from_result(observation));
-        self.revision = self.revision.checked_add(1).expect("result revision overflow");
+        self.revision = self
+            .revision
+            .checked_add(1)
+            .expect("result revision overflow");
         Some(id)
     }
 
     pub fn clear(&mut self) {
         self.rows.clear();
         self.dropped = 0;
-        self.generation = self.generation.checked_add(1).expect("result generation overflow");
-        self.revision = self.revision.checked_add(1).expect("result revision overflow");
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .expect("result generation overflow");
+        self.revision = self
+            .revision
+            .checked_add(1)
+            .expect("result revision overflow");
     }
 
     pub fn len(&self) -> usize {
