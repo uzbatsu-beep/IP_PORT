@@ -3072,7 +3072,11 @@ mod tests {
             if !output.status.success() {
                 return None;
             }
-            let kib = String::from_utf8(output.stdout).ok()?.trim().parse::<u64>().ok()?;
+            let kib = String::from_utf8(output.stdout)
+                .ok()?
+                .trim()
+                .parse::<u64>()
+                .ok()?;
             kib.checked_mul(1024)
         }
         #[cfg(target_os = "windows")]
@@ -3146,13 +3150,8 @@ mod tests {
                 let mut max_shapes = 0;
                 for frame in 0..65 {
                     let start = Instant::now();
-                    let output = run_headless_frame(
-                        &mut app,
-                        &ctx,
-                        egui::vec2(1180.0, 760.0),
-                        1.0,
-                        vec![],
-                    );
+                    let output =
+                        run_headless_frame(&mut app, &ctx, egui::vec2(1180.0, 760.0), 1.0, vec![]);
                     let elapsed = ms(start.elapsed());
                     max_shapes = max_shapes.max(output.shapes.len());
                     if frame < 5 {
