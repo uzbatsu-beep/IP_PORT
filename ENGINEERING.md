@@ -62,3 +62,6 @@ DEC-017: C2 variant B approved, keep Windows-first, preserve UX and algorithm se
 
 
 DEC-018: C3 typed selection approved. Keep selection outside filters and collapsed groups, typed action guards, Ports boundary navigation, Windows-first CI and current layout. C4 live performance and D acceptance remain separate. No dependency changes.
+
+
+DEC-019: C4 baseline and integration in one PR; optimize separately only after evidence. Keep existing Quality Gate, Windows-first and exact-SHA release acceptance. Windows 0.5.0 package requested; public publication requires authorized release tooling and compliance with release workflow, not a PR artifact.

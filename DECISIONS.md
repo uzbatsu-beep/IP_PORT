@@ -27,6 +27,7 @@
 | DEC-016 | 2026-11-26: ENG-01.C утверждён | C1–C4: инкапсулированное хранилище, staged projection, типизированный выбор и стабильные EndpointId, Live Performance QA; замена get_if_addrs отдельным PR. Windows-first CI; Linux/macOS сборки отложены до финальной приёмки и релиза. |
 | DEC-017 | 2026-11-26: ENG-01.C2 утверждён | Вариант B, revision-based cache, поэтапная инвалидация, метрики и тесты эквивалентности; устранение повторных проверок поиска; UX preserve, Windows-first CI. C3 selection и C4 live QA отдельно. |
 | DEC-018 | 2026-11-27: ENG-01.C3 утверждён | Typed SelectionState: None / Host(IpAddr) / Endpoint(EndpointId); сохранить выбор вне фильтра и при сворачивании, типизированные ограничения команд, Ports boundary navigation, регрессионные тесты и Performance QA, Windows-first, без редизайна. |
+| DEC-019 | 2026-11-27: ENG-01.C4 утверждён | Вариант B, LIVE-01–11, расширенные JSON-метрики, baseline без новых временных барьеров, C4.1+C4.2 одним PR, C4.3 по измерениям. Windows-first и прежний Quality Gate. Запрошен Windows-релиз текущей версии 0.5.0 из проверенного main; существующая политика публикации не обходится. |
 
 ## Изучить до внедрения
 

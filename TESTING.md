@@ -63,3 +63,6 @@ ENG-01.C2 adds headless projection equivalence against the previous full-rebuild
 
 
 ENG-01.C3: independent SelectionState tests cover host independence, repeated observation IDs, stale IDs and invalid host transitions. App regressions cover sorting/filtering, live insertion, metadata invalidation, collapse, cache reuse, clear/new scan, failed spawn, host copy and endpoint command guards, and Ports boundary navigation. Existing keyboard, resize, navigation and load tests are adapted to the typed API; timing gates remain unchanged. Manual UI acceptance remains pending.
+
+
+Live QA runs isolated in optimized mode; functional suite excludes this large matrix and verifies its presence. Python report validation rejects missing scenarios, lost observations, inconsistent queues or invalid metrics. New timing thresholds are diagnostic only. Export uses the same background writer via an extracted path-based entry point, avoiding a native file dialog in tests. Linux/macOS remain deferred.
