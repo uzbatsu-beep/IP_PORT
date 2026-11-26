@@ -195,7 +195,10 @@ fn inspector(app: &App, ui: &mut Ui, language: Language) {
     }
     components::section_divider(ui);
     if app.selected_host_only {
-        ui.label(language.text("Select an endpoint to inspect its service.", "Выберите порт для просмотра сервиса."));
+        ui.label(language.text(
+            "Select an endpoint to inspect its service.",
+            "Выберите порт для просмотра сервиса.",
+        ));
         return;
     }
     ui.label(RichText::new(language.text("Selected endpoint", "Выбранный порт")).strong());

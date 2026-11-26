@@ -43,19 +43,47 @@ fn validate_catalog(data: &Catalog) -> Result<(), String> {
     }
     for entry in &data.entries {
         if !ids.insert(entry.id.as_str())
-            || [&entry.id, &entry.vendor, &entry.family, &entry.transport, &entry.ports, &entry.purpose, &entry.notes, &entry.kind, &entry.source].iter().any(|v| v.trim().is_empty())
+            || [
+                &entry.id,
+                &entry.vendor,
+                &entry.family,
+                &entry.transport,
+                &entry.ports,
+                &entry.purpose,
+                &entry.notes,
+                &entry.kind,
+                &entry.source,
+            ]
+            .iter()
+            .any(|v| v.trim().is_empty())
             || !entry.source.starts_with("https://")
-            || !matches!(entry.kind.as_str(), "documented_default" | "conditional" | "configurable" | "unverified_port" | "layer2" | "registered_candidate" | "research_pending")
+            || !matches!(
+                entry.kind.as_str(),
+                "documented_default"
+                    | "conditional"
+                    | "configurable"
+                    | "unverified_port"
+                    | "layer2"
+                    | "registered_candidate"
+                    | "research_pending"
+            )
         {
             return Err(format!("Invalid or duplicate catalog entry {}", entry.id));
         }
     }
     for id in CANDIDATE_IDS {
-        let entry = data.entries.iter().find(|e| e.id == *id).ok_or_else(|| format!("Missing candidate {id}"))?;
-        if entry.kind != "documented_default" || !matches!(entry.transport.as_str(), "TCP" | "UDP" | "TCP/UDP") {
+        let entry = data
+            .entries
+            .iter()
+            .find(|e| e.id == *id)
+            .ok_or_else(|| format!("Missing candidate {id}"))?;
+        if entry.kind != "documented_default"
+            || !matches!(entry.transport.as_str(), "TCP" | "UDP" | "TCP/UDP")
+        {
             return Err(format!("Invalid candidate {id}"));
         }
-        targets::parse_ports(&entry.ports.replace('–', "-")).map_err(|e| format!("Candidate {id}: {e}"))?;
+        targets::parse_ports(&entry.ports.replace('–', "-"))
+            .map_err(|e| format!("Candidate {id}: {e}"))?;
     }
     for (name, group) in PROTOCOL_GROUPS {
         if group.is_empty() || !group.iter().all(|id| CANDIDATE_IDS.contains(id)) {
@@ -184,7 +212,8 @@ mod tests {
 
     #[test]
     fn catalog_integrity_rejects_duplicate_and_missing_candidate() {
-        let mut data: Catalog = serde_json::from_str(include_str!("../data/industrial_protocols.json")).unwrap();
+        let mut data: Catalog =
+            serde_json::from_str(include_str!("../data/industrial_protocols.json")).unwrap();
         assert!(validate_catalog(&data).is_ok());
         data.entries[1].id = data.entries[0].id.clone();
         assert!(validate_catalog(&data).is_err());
