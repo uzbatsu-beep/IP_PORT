@@ -264,82 +264,78 @@ pub fn show_inspector_toolbar(app: &mut App, entry_idx: usize, ui: &mut Ui) {
     let web_url = web_url_for(ip, port, service, banner);
 
     ui.add_space(4.0);
-    egui::Frame::group(ui.style())
-        .fill(ui.visuals().faint_bg_color)
-        .inner_margin(egui::Margin::symmetric(8, 6))
-        .corner_radius(4.0)
-        .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("Selected:").strong().small());
-                ui.label(
-                    RichText::new(format!(
-                        "{}:{} ({}, {})",
-                        entry.ip_text, entry.port_text, entry.raw.service, entry.latency_text
-                    ))
-                    .small(),
-                );
+    crate::ui::components::surface(ui).show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("Selected:").strong().small());
+            ui.label(
+                RichText::new(format!(
+                    "{}:{} ({}, {})",
+                    entry.ip_text, entry.port_text, entry.raw.service, entry.latency_text
+                ))
+                .small(),
+            );
 
-                ui.separator();
+            ui.separator();
 
-                if let Some(url) = &web_url
-                    && ui
-                        .small_button("🌐 Open Web")
-                        .on_hover_text("Open URL in default web browser (Enter)")
-                        .clicked()
-                {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(url));
-                }
-
-                if ui
-                    .small_button("📋 Copy IP:Port")
-                    .on_hover_text("Copy address and port to clipboard")
+            if let Some(url) = &web_url
+                && ui
+                    .small_button("🌐 Open Web")
+                    .on_hover_text("Open URL in default web browser (Enter)")
                     .clicked()
-                {
-                    let text = format!("{}:{}", entry.ip_text, entry.port_text);
-                    app.copy_text_with_toast(ui.ctx(), text.clone(), format!("Copied {text}"));
-                }
+            {
+                ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+            }
 
-                if ui
-                    .small_button("⚡ curl")
-                    .on_hover_text("Copy curl probe command")
+            if ui
+                .small_button("📋 Copy IP:Port")
+                .on_hover_text("Copy address and port to clipboard")
+                .clicked()
+            {
+                let text = format!("{}:{}", entry.ip_text, entry.port_text);
+                app.copy_text_with_toast(ui.ctx(), text.clone(), format!("Copied {text}"));
+            }
+
+            if ui
+                .small_button("⚡ curl")
+                .on_hover_text("Copy curl probe command")
+                .clicked()
+            {
+                let cmd = curl_command(ip, port, service, banner);
+                app.copy_text_with_toast(ui.ctx(), cmd, "Copied curl command".to_owned());
+            }
+
+            if let Some(ssh) = ssh_command(ip, port, service)
+                && ui
+                    .small_button("💻 ssh")
+                    .on_hover_text("Copy SSH command")
                     .clicked()
-                {
-                    let cmd = curl_command(ip, port, service, banner);
-                    app.copy_text_with_toast(ui.ctx(), cmd, "Copied curl command".to_owned());
-                }
+            {
+                app.copy_text_with_toast(ui.ctx(), ssh.clone(), format!("Copied {ssh}"));
+            }
 
-                if let Some(ssh) = ssh_command(ip, port, service)
-                    && ui
-                        .small_button("💻 ssh")
-                        .on_hover_text("Copy SSH command")
-                        .clicked()
-                {
-                    app.copy_text_with_toast(ui.ctx(), ssh.clone(), format!("Copied {ssh}"));
-                }
+            if ui
+                .small_button("🔍 Filter Host")
+                .on_hover_text("Filter results table to only show ports for this host")
+                .clicked()
+            {
+                app.results_filter = entry.ip_text.clone();
+            }
 
-                if ui
-                    .small_button("🔍 Filter Host")
-                    .on_hover_text("Filter results table to only show ports for this host")
-                    .clicked()
-                {
-                    app.results_filter = entry.ip_text.clone();
-                }
+            if ui
+                .small_button("🎯 Scan Host")
+                .on_hover_text("Load this IP as target with ports 1-1024")
+                .clicked()
+            {
+                app.targets_input = entry.ip_text.clone();
+                app.ports_input = "1-1024".to_owned();
+                app.show_toast(format!("Targets set to {} (ports 1-1024)", entry.ip_text));
+            }
 
-                if ui
-                    .small_button("🎯 Scan Host")
-                    .on_hover_text("Load this IP as target with ports 1-1024")
-                    .clicked()
-                {
-                    app.targets_input = entry.ip_text.clone();
-                    app.ports_input = "1-1024".to_owned();
-                    app.show_toast(format!("Targets set to {} (ports 1-1024)", entry.ip_text));
-                }
-
-                if ui.small_button("✕").on_hover_text("Deselect row").clicked() {
-                    app.selected_result = None;
-                }
-            });
+            if ui.small_button("✕").on_hover_text("Deselect row").clicked() {
+                app.selected_result = None;
+            }
         });
+    });
 }
 
 #[cfg(test)]

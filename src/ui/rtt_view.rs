@@ -1,6 +1,7 @@
 use egui::{Color32, RichText, Ui};
 
 use crate::app::App;
+use crate::ui::components;
 use crate::scanner::{PortState, ScanResult};
 
 /// Статистические метрики задержки (RTT) для набора открытых портов.
@@ -185,138 +186,138 @@ pub fn calculate_rtt_stats(results: &[ScanResult]) -> Option<RttStats> {
 /// Отображает блок визуализации задержки (RTT Distribution).
 pub fn show_rtt_panel(_app: &mut App, stats: &RttStats, ui: &mut Ui) {
     ui.scope(|ui| {
-        egui::Frame::group(ui.style())
-            .fill(ui.visuals().faint_bg_color)
-            .inner_margin(egui::Margin::symmetric(10, 8))
-            .corner_radius(6.0)
-            .show(ui, |ui| {
-                // Строка заголовка и кратких метрик
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new("📊 Latency (RTT)").strong().small());
-                    ui.separator();
-                    ui.label(
-                        RichText::new(format!("Min: {:.2} ms", stats.min_ms))
-                            .small()
-                            .color(BUCKET_COLORS[0]),
-                    );
-                    ui.label(
-                        RichText::new(format!("Avg: {:.2} ms", stats.avg_ms))
-                            .small()
-                            .weak(),
-                    );
-                    ui.label(
-                        RichText::new(format!("Median: {:.2} ms", stats.median_ms))
-                            .small()
-                            .strong(),
-                    );
-                    ui.label(
-                        RichText::new(format!("p95: {:.2} ms", stats.p95_ms))
-                            .small()
-                            .weak(),
-                    );
-                    ui.label(
-                        RichText::new(format!("Max: {:.2} ms", stats.max_ms))
-                            .small()
-                            .color(BUCKET_COLORS[4]),
-                    );
-                });
-
-                ui.add_space(4.0);
-
-                // Горизонтальный составной прогресс-бар распределения
-                let bar_height = 6.0;
-                let available_width = ui.available_width().max(100.0);
-                let (rect, _response) = ui.allocate_exact_size(
-                    egui::vec2(available_width, bar_height),
-                    egui::Sense::hover(),
+        components::surface(ui).show(ui, |ui| {
+            // Строка заголовка и кратких метрик
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("📊 Latency (RTT)").strong().small());
+                ui.separator();
+                ui.label(
+                    RichText::new(format!("Min: {:.2} ms", stats.min_ms))
+                        .small()
+                        .color(components::rtt_color(ui, 0, BUCKET_COLORS[0])),
                 );
-                let painter = ui.painter();
-
-                // Фоновая подложка
-                painter.rect_filled(rect, 3.0, ui.visuals().extreme_bg_color);
-
-                let mut current_x = rect.min.x;
-                for bucket in &stats.buckets {
-                    if bucket.count == 0 {
-                        continue;
-                    }
-                    let seg_width = (available_width * (bucket.percentage / 100.0)).max(1.0);
-                    let seg_rect = egui::Rect::from_min_max(
-                        egui::pos2(current_x, rect.min.y),
-                        egui::pos2((current_x + seg_width).min(rect.max.x), rect.max.y),
-                    );
-                    painter.rect_filled(seg_rect, 0.0, bucket.color);
-                    current_x += seg_width;
-                }
-
-                ui.add_space(6.0);
-
-                // Столбчатая мини-гистограмма по 5 корзинам
-                let max_bucket_count = stats
-                    .buckets
-                    .iter()
-                    .map(|b| b.count)
-                    .max()
-                    .unwrap_or(1)
-                    .max(1);
-
-                ui.columns(5, |columns| {
-                    for (i, col) in columns.iter_mut().enumerate() {
-                        let bucket = &stats.buckets[i];
-                        col.vertical_centered(|ui| {
-                            // Подпись количества сверху
-                            ui.label(RichText::new(format!("{}", bucket.count)).small().color(
-                                if bucket.count > 0 {
-                                    ui.visuals().text_color()
-                                } else {
-                                    ui.visuals().weak_text_color()
-                                },
-                            ));
-
-                            // Отрисовка вертикального столбика
-                            let col_width = 24.0f32.min(ui.available_width());
-                            let max_col_height = 36.0f32;
-                            let bar_h = if bucket.count > 0 {
-                                ((bucket.count as f32 / max_bucket_count as f32) * max_col_height)
-                                    .max(4.0)
-                            } else {
-                                2.0
-                            };
-
-                            let (bar_rect, bar_resp) = ui.allocate_exact_size(
-                                egui::vec2(col_width, max_col_height),
-                                egui::Sense::hover(),
-                            );
-                            let bar_painter = ui.painter();
-
-                            // Отрисовываем столбик снизу вверх
-                            let filled_rect = egui::Rect::from_min_max(
-                                egui::pos2(bar_rect.min.x, bar_rect.max.y - bar_h),
-                                egui::pos2(bar_rect.max.x, bar_rect.max.y),
-                            );
-                            let fill_color = if bucket.count > 0 {
-                                bucket.color
-                            } else {
-                                ui.visuals().extreme_bg_color
-                            };
-                            bar_painter.rect_filled(filled_rect, 2.0, fill_color);
-
-                            // Всплывающая подсказка с деталями
-                            let tooltip_text = format!(
-                                "Range: {}\nCount: {} port{}\nShare: {:.1}% of total",
-                                bucket.label,
-                                bucket.count,
-                                if bucket.count == 1 { "" } else { "s" },
-                                bucket.percentage
-                            );
-                            bar_resp.on_hover_text(tooltip_text);
-
-                            // Подпись диапазона снизу
-                            ui.label(RichText::new(bucket.label).small().weak());
-                        });
-                    }
-                });
+                ui.label(
+                    RichText::new(format!("Avg: {:.2} ms", stats.avg_ms))
+                        .small()
+                        .weak(),
+                );
+                ui.label(
+                    RichText::new(format!("Median: {:.2} ms", stats.median_ms))
+                        .small()
+                        .strong(),
+                );
+                ui.label(
+                    RichText::new(format!("p95: {:.2} ms", stats.p95_ms))
+                        .small()
+                        .weak(),
+                );
+                ui.label(
+                    RichText::new(format!("Max: {:.2} ms", stats.max_ms))
+                        .small()
+                        .color(components::rtt_color(ui, 4, BUCKET_COLORS[4])),
+                );
             });
+
+            ui.add_space(4.0);
+
+            // Горизонтальный составной прогресс-бар распределения
+            let bar_height = 6.0;
+            let available_width = ui.available_width().max(100.0);
+            let (rect, _response) = ui.allocate_exact_size(
+                egui::vec2(available_width, bar_height),
+                egui::Sense::hover(),
+            );
+            let painter = ui.painter();
+
+            // Фоновая подложка
+            painter.rect_filled(rect, 3.0, ui.visuals().extreme_bg_color);
+
+            let mut current_x = rect.min.x;
+            for (index, bucket) in stats.buckets.iter().enumerate() {
+                if bucket.count == 0 {
+                    continue;
+                }
+                let seg_width = (available_width * (bucket.percentage / 100.0)).max(1.0);
+                let seg_rect = egui::Rect::from_min_max(
+                    egui::pos2(current_x, rect.min.y),
+                    egui::pos2((current_x + seg_width).min(rect.max.x), rect.max.y),
+                );
+                painter.rect_filled(
+                    seg_rect,
+                    0.0,
+                    components::rtt_color(ui, index, bucket.color),
+                );
+                current_x += seg_width;
+            }
+
+            ui.add_space(6.0);
+
+            // Столбчатая мини-гистограмма по 5 корзинам
+            let max_bucket_count = stats
+                .buckets
+                .iter()
+                .map(|b| b.count)
+                .max()
+                .unwrap_or(1)
+                .max(1);
+
+            ui.columns(5, |columns| {
+                for (i, col) in columns.iter_mut().enumerate() {
+                    let bucket = &stats.buckets[i];
+                    col.vertical_centered(|ui| {
+                        // Подпись количества сверху
+                        ui.label(RichText::new(format!("{}", bucket.count)).small().color(
+                            if bucket.count > 0 {
+                                ui.visuals().text_color()
+                            } else {
+                                ui.visuals().weak_text_color()
+                            },
+                        ));
+
+                        // Отрисовка вертикального столбика
+                        let col_width = 24.0f32.min(ui.available_width());
+                        let max_col_height = 36.0f32;
+                        let bar_h = if bucket.count > 0 {
+                            ((bucket.count as f32 / max_bucket_count as f32) * max_col_height)
+                                .max(4.0)
+                        } else {
+                            2.0
+                        };
+
+                        let (bar_rect, bar_resp) = ui.allocate_exact_size(
+                            egui::vec2(col_width, max_col_height),
+                            egui::Sense::hover(),
+                        );
+                        let bar_painter = ui.painter();
+
+                        // Отрисовываем столбик снизу вверх
+                        let filled_rect = egui::Rect::from_min_max(
+                            egui::pos2(bar_rect.min.x, bar_rect.max.y - bar_h),
+                            egui::pos2(bar_rect.max.x, bar_rect.max.y),
+                        );
+                        let fill_color = if bucket.count > 0 {
+                            components::rtt_color(ui, i, bucket.color)
+                        } else {
+                            ui.visuals().extreme_bg_color
+                        };
+                        bar_painter.rect_filled(filled_rect, 2.0, fill_color);
+
+                        // Всплывающая подсказка с деталями
+                        let tooltip_text = format!(
+                            "Range: {}\nCount: {} port{}\nShare: {:.1}% of total",
+                            bucket.label,
+                            bucket.count,
+                            if bucket.count == 1 { "" } else { "s" },
+                            bucket.percentage
+                        );
+                        bar_resp.on_hover_text(tooltip_text);
+
+                        // Подпись диапазона снизу
+                        ui.label(RichText::new(bucket.label).small().weak());
+                    });
+                }
+            });
+        });
     });
 }
 

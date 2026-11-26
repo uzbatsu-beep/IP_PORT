@@ -145,3 +145,8 @@ MIT
 ## Appearance (UI-01)
 
 Open **Appearance** above the scan controls. Select Light or Dark independently of one of eight accent palettes; changes are applied immediately and saved on selection. **Reset appearance** restores Dark / Classic Blue. Settings are stored as `appearance.json` beside the application's OUI directory, not in scan profiles. If reading or saving fails, the appearance panel shows the error and offers Retry save. Existing scan state is not reset by theme changes. See [UI appearance](UI_APPEARANCE.md) for paths and acceptance tests.
+
+
+## Shared UI components (UI-02)
+
+The scanner uses reusable theme-aware controls, semantic status text, metrics, panel surfaces and empty states. RTT severity colors adapt to light/dark while retaining their meaning. See [UI design system](UI_DESIGN_SYSTEM.md).

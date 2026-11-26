@@ -199,3 +199,10 @@
 - Independent Light/Dark themes and eight accent palettes, immediate application and per-user JSON persistence.
 - Theme-aware scan controls, status labels, selection and notifications; RTT severity colors retain their existing meaning.
 - Default appearance recovery, visible persistence errors and retry/reset controls; no new dependencies or scanner changes.
+
+
+### UI-02 (unreleased)
+
+- Shared theme-aware action buttons, status text, panel surfaces, metric rows, empty states and table row height.
+- Light-theme RTT severity shades; no changes to latency statistics or scan behavior.
+- Headless component and populated-view rendering tests across all 16 appearances.

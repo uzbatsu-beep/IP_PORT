@@ -2,10 +2,11 @@ use egui::{Align, RichText, Ui};
 use egui_extras::{Column, TableBuilder};
 
 use crate::app::{App, SortColumn};
+use crate::ui::components::{self, Tone};
 
 pub fn show(app: &mut App, ui: &mut Ui) {
     ui.horizontal(|ui| {
-        ui.heading(RichText::new("Results").strong());
+        components::section_heading(ui, "Results");
         ui.label(
             RichText::new(format!("{} stored", app.results.len()))
                 .weak()
@@ -18,7 +19,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 "Clear collected results"
             };
             if ui
-                .add_enabled(!app.results.is_empty(), egui::Button::new("Clear"))
+                .add_enabled(!app.results.is_empty(), components::secondary_button("Clear"))
                 .on_hover_text(clear_hint)
                 .clicked()
             {
@@ -87,21 +88,18 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 
     app.ensure_results_view();
     if app.visible_indices().is_empty() {
-        ui.add_space(40.0);
-        ui.vertical_centered(|ui| {
-            let message = if app.results.is_empty() {
-                if app.is_stopping() {
-                    "Stopping scan..."
-                } else if app.is_running() {
-                    "Scanning... open ports will appear here"
-                } else {
-                    "No results yet — configure targets on the left and press Start scan"
-                }
+        let message = if app.results.is_empty() {
+            if app.is_stopping() {
+                "Stopping scan..."
+            } else if app.is_running() {
+                "Scanning... open ports will appear here"
             } else {
-                "No results match the current filter"
-            };
-            ui.label(RichText::new(message).weak());
-        });
+                "No results yet — configure targets on the left and press Start scan"
+            }
+        } else {
+            "No results match the current filter"
+        };
+        components::empty_state(ui, message);
         return;
     }
 
@@ -126,7 +124,7 @@ fn render_flat_table(app: &mut App, ui: &mut Ui) {
         SortColumn::Service,
         SortColumn::Latency,
     ];
-    let row_height = 22.0;
+    let row_height = components::TABLE_ROW_HEIGHT;
     let visible_len = app.visible_indices().len();
 
     ui.scope(|ui| {
@@ -258,17 +256,20 @@ fn render_flat_table(app: &mut App, ui: &mut Ui) {
                         if entry.raw.state == crate::scanner::PortState::OpenFiltered {
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    RichText::new("?").color(crate::ui::theme::warning(ui)).small(),
+                                    components::semantic_text(ui, "?", Tone::Warning).small(),
                                 );
                                 ui.label(
-                                    RichText::new(format!("{} (open|filtered)", entry.raw.service))
-                                        .color(crate::ui::theme::warning(ui)),
+                                    components::semantic_text(
+                                        ui,
+                                        format!("{} (open|filtered)", entry.raw.service),
+                                        Tone::Warning,
+                                    ),
                                 );
                             });
                         } else if entry.raw.service_verified {
                             ui.horizontal(|ui| {
                                 ui.label(
-                                    RichText::new("✔").color(crate::ui::theme::success(ui)).small(),
+                                    components::semantic_text(ui, "✔", Tone::Success).small(),
                                 );
                                 ui.label(RichText::new(entry.raw.service.as_str()).strong());
                             });

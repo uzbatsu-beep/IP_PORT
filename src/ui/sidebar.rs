@@ -2,11 +2,11 @@ use egui::{RichText, Ui};
 
 use crate::app::{App, ScopePreview, StatusLevel};
 use crate::scanner::presets;
-use crate::ui::theme;
+use crate::ui::{components, theme};
 
 pub fn show(app: &mut App, ui: &mut Ui) {
     ui.add_space(4.0);
-    ui.heading(RichText::new("IP / PORT Scanner").strong());
+    components::section_heading(ui, "IP / PORT Scanner");
     ui.label(RichText::new("Async TCP & UDP port scanner").weak());
     ui.add_space(12.0);
 
@@ -394,8 +394,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     ui.horizontal_wrapped(|ui| {
         let cmd = crate::ui::cmd_key_name();
         let can_start = !running && preview.is_ok();
-        let start = egui::Button::new(RichText::new("Start scan").strong())
-            .fill(ui.visuals().selection.bg_fill);
+        let start = components::primary_button(ui, "Start scan");
         let start_hover = match &preview {
             Ok(_) => format!("Begin scanning the configured targets and ports ({cmd}+Enter)"),
             Err(err) => err.clone(),
@@ -409,11 +408,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         }
 
         let stop_label = if stopping { "Stopping..." } else { "Stop" };
-        let mut stop_button = egui::Button::new(stop_label);
-        if running && !stopping {
-            stop_button =
-                stop_button.fill(theme::tint(ui.visuals().panel_fill, theme::error(ui), 12));
-        }
+        let stop_button = components::danger_button(ui, stop_label, running && !stopping);
         if ui
             .add_enabled(running && !stopping, stop_button)
             .on_hover_text("Cancel the current scan (Esc)")
@@ -465,13 +460,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 
     if !app.status.is_empty() {
         ui.add_space(6.0);
-        let status_text = match app.status_level {
-            StatusLevel::Idle => RichText::new(&app.status).weak(),
-            StatusLevel::Running => RichText::new(&app.status).color(theme::accent(ui)),
-            StatusLevel::Stopping => RichText::new(&app.status).color(theme::warning(ui)),
-            StatusLevel::Success => RichText::new(&app.status).color(theme::success(ui)),
-            StatusLevel::Error => RichText::new(&app.status).color(theme::error(ui)),
-        };
+        let status_text = components::status_text(ui, &app.status, app.status_level);
         if let Some(path) = &app.last_export_path
             && app.status.starts_with("Saved ")
         {
@@ -492,9 +481,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         }
     }
 
-    ui.add_space(8.0);
-    ui.separator();
-    ui.add_space(8.0);
+    components::section_divider(ui);
     summary(app, &preview, ui);
 }
 
@@ -557,25 +544,15 @@ fn summary(app: &App, preview: &Result<ScopePreview, String>, ui: &mut Ui) {
         .num_columns(2)
         .spacing([16.0, 4.0])
         .show(ui, |ui| {
-            ui.label(RichText::new("Targets").weak());
-            ui.label(targets.to_string());
-            ui.end_row();
+            components::metric_row(ui, "Targets", targets, false);
 
-            ui.label(RichText::new("Ports").weak());
-            ui.label(ports.to_string());
-            ui.end_row();
+            components::metric_row(ui, "Ports", ports, false);
 
-            ui.label(RichText::new("Probes").weak());
-            ui.label(probes.to_string());
-            ui.end_row();
+            components::metric_row(ui, "Probes", probes, false);
 
-            ui.label(RichText::new("Stored open results").weak());
-            ui.label(RichText::new(app.results.len().to_string()).strong());
-            ui.end_row();
+            components::metric_row(ui, "Stored open results", app.results.len(), true);
 
-            ui.label(RichText::new("Open probes").weak());
-            ui.label(app.probe_counts.open.to_string());
-            ui.end_row();
+            components::metric_row(ui, "Open probes", app.probe_counts.open, false);
 
             if app.probe_counts.open_filtered > 0 {
                 ui.label(RichText::new("Open|Filtered").color(theme::warning(ui)))
@@ -586,13 +563,9 @@ fn summary(app: &App, preview: &Result<ScopePreview, String>, ui: &mut Ui) {
                 ui.end_row();
             }
 
-            ui.label(RichText::new("Refused").weak());
-            ui.label(app.probe_counts.refused.to_string());
-            ui.end_row();
+            components::metric_row(ui, "Refused", app.probe_counts.refused, false);
 
-            ui.label(RichText::new("Timed out").weak());
-            ui.label(app.probe_counts.timed_out.to_string());
-            ui.end_row();
+            components::metric_row(ui, "Timed out", app.probe_counts.timed_out, false);
 
             if app.probe_counts.unreachable > 0 {
                 ui.label(RichText::new("Unreachable").color(theme::warning(ui)))
@@ -603,9 +576,7 @@ fn summary(app: &App, preview: &Result<ScopePreview, String>, ui: &mut Ui) {
                 ui.end_row();
             }
 
-            ui.label(RichText::new("Other errors").weak());
-            ui.label(app.probe_counts.errors.to_string());
-            ui.end_row();
+            components::metric_row(ui, "Other errors", app.probe_counts.errors, false);
 
             if app.dropped_open_results > 0 {
                 ui.label(RichText::new("Not stored (limit)").color(theme::warning(ui)));
