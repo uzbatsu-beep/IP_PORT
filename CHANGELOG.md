@@ -235,3 +235,10 @@
 - Shared read-only knowledge facade; existing OUI and services controls in Knowledge Base.
 - Enhanced existing ScopePreview, separate planned and actual counters, timeout-only estimate. Profile v1 unchanged.
 - Prepare Cargo package and lockfile version 0.5.0. No new probes or dependencies.
+
+
+### UI-03.5 (unreleased)
+
+- Virtualized host and endpoint tables, collapsed host groups, combined filters and independent host sorting.
+- Shared host/endpoint selection, evidence and transport/state columns; preserve raw results and exports.
+- 100k stress regression and catalog integrity validation; add four reference-only entries, correct EtherCAT source.

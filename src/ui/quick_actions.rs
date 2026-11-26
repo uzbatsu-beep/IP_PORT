@@ -336,6 +336,7 @@ pub fn show_inspector_toolbar(app: &mut App, entry_idx: usize, ui: &mut Ui) {
 
             if ui.small_button("✕").on_hover_text("Deselect row").clicked() {
                 app.selected_result = None;
+                app.selected_host_only = false;
             }
         });
     });

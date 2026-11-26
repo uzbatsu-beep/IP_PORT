@@ -31,8 +31,38 @@ pub fn catalog() -> &'static Result<Catalog, String> {
         if data.schema_version != 1 {
             return Err("Unsupported catalog schema".to_owned());
         }
+        validate_catalog(&data)?;
         Ok(data)
     })
+}
+
+fn validate_catalog(data: &Catalog) -> Result<(), String> {
+    let mut ids = std::collections::HashSet::new();
+    if data.entries.is_empty() || data.reviewed.trim().is_empty() {
+        return Err("Empty catalog or review date".to_owned());
+    }
+    for entry in &data.entries {
+        if !ids.insert(entry.id.as_str())
+            || [&entry.id, &entry.vendor, &entry.family, &entry.transport, &entry.ports, &entry.purpose, &entry.notes, &entry.kind, &entry.source].iter().any(|v| v.trim().is_empty())
+            || !entry.source.starts_with("https://")
+            || !matches!(entry.kind.as_str(), "documented_default" | "conditional" | "configurable" | "unverified_port" | "layer2" | "registered_candidate" | "research_pending")
+        {
+            return Err(format!("Invalid or duplicate catalog entry {}", entry.id));
+        }
+    }
+    for id in CANDIDATE_IDS {
+        let entry = data.entries.iter().find(|e| e.id == *id).ok_or_else(|| format!("Missing candidate {id}"))?;
+        if entry.kind != "documented_default" || !matches!(entry.transport.as_str(), "TCP" | "UDP" | "TCP/UDP") {
+            return Err(format!("Invalid candidate {id}"));
+        }
+        targets::parse_ports(&entry.ports.replace('–', "-")).map_err(|e| format!("Candidate {id}: {e}"))?;
+    }
+    for (name, group) in PROTOCOL_GROUPS {
+        if group.is_empty() || !group.iter().all(|id| CANDIDATE_IDS.contains(id)) {
+            return Err(format!("Invalid protocol group {name}"));
+        }
+    }
+    Ok(())
 }
 
 /// Current services registry and MAC allocation counts remain independent sources.
@@ -151,6 +181,14 @@ pub fn candidates(selection: Selection<'_>, protocol: ScanProtocol) -> Result<Ca
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalog_integrity_rejects_duplicate_and_missing_candidate() {
+        let mut data: Catalog = serde_json::from_str(include_str!("../data/industrial_protocols.json")).unwrap();
+        assert!(validate_catalog(&data).is_ok());
+        data.entries[1].id = data.entries[0].id.clone();
+        assert!(validate_catalog(&data).is_err());
+    }
 
     #[test]
     fn presets_derive_only_reviewed_transport_specific_candidates() {
