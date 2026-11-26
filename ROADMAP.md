@@ -289,3 +289,8 @@
 После каждого изменения отмечать выполненные пункты только после проверки, записывать новые
 ограничения в `ARCHITECTURE.md`, менять следующий шаг здесь и обновлять пользовательское описание
 в `README.md`. Фиксировать команды и платформы проверок, если они влияют на выводы.
+
+
+## UI-01 — Appearance foundation
+
+Implementation scope: independent Light/Dark and eight accent palettes, automatic per-user persistence, explicit reset, theme-aware widgets and status colors. See [UI appearance](UI_APPEARANCE.md). UI-02 (component normalization) and UI-03 (workspace redesign) follow Windows visual acceptance; previously approved industrial asset identification remains in scope and is not reprioritized by this change.
