@@ -13,6 +13,7 @@
 - Pin development/release Rust 1.100.0; preserve MSRV 1.95.0 and Cargo.lock; use locked Cargo commands.
 - Add cross-platform preflight and regression tests; pin updated Node.js 24 Actions by verified upstream commit SHA.
 - Add engineering and agent rules; plan separate performance, dependency and architecture stages. No scanner behavior changes.
+- After repeat Windows timing failures, isolate both load tests in preflight/CI; record cold/warm-up frames separately, retain 60 steady-state samples and existing timing thresholds; report actual OS/architecture instead of hard-coded hardware.
 
 ### Изменено (PR #11 — аудит сопровождения)
 - Удалён устаревший одноразовый workflow публикации v0.3.1; ограничены права release jobs, добавлены проверка тега/версии и полноты SHA-256 manifest.

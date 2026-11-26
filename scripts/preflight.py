@@ -9,6 +9,40 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+PERFORMANCE_TESTS = (
+    "app::tests::stress_benchmark_events_sorting_and_rendering",
+    "app::tests::virtualized_device_rows_at_storage_limit",
+)
+
+
+def test_commands(channel: str) -> list[list[str]]:
+    cargo = ["cargo", f"+{channel}", "test", "--locked"]
+    functional = [*cargo, "--all-targets", "--"]
+    for name in PERFORMANCE_TESTS:
+        functional.extend(["--skip", name])
+    isolated = [
+        [*cargo, "--bin", "ip_port_scanner", name, "--", "--exact", "--test-threads=1", "--nocapture"]
+        for name in PERFORMANCE_TESTS
+    ]
+    return [functional, *isolated]
+
+
+def verify_performance_tests(channel: str) -> bool:
+    """Fail closed if a renamed or missing test would result in zero tests."""
+    command = ["cargo", f"+{channel}", "test", "--locked", "--bin", "ip_port_scanner", "--", "--list"]
+    try:
+        result = subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True)
+    except (OSError, subprocess.CalledProcessError) as error:
+        print(f"Cannot enumerate performance tests: {error}", file=sys.stderr)
+        if isinstance(error, subprocess.CalledProcessError) and error.stderr:
+            print(error.stderr, file=sys.stderr)
+        return False
+    listed = set(result.stdout.splitlines())
+    missing = [name for name in PERFORMANCE_TESTS if f"{name}: test" not in listed]
+    if missing:
+        print(f"Missing required performance tests: {missing}", file=sys.stderr)
+        return False
+    return True
 
 
 def pinned_channel() -> str:
@@ -29,7 +63,7 @@ def commands(channel: str, format_only: bool = False) -> list[list[str]]:
         checks += [
             [*cargo, "check", "--locked", "--all-targets"],
             [*cargo, "clippy", "--locked", "--all-targets", "--", "-D", "warnings"],
-            [*cargo, "test", "--locked", "--all-targets"],
+            *test_commands(channel),
             [*cargo, "build", "--locked", "--release"],
         ]
     return checks
@@ -52,14 +86,27 @@ def execute(checks: list[list[str]]) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--format-only", action="store_true", help="Only Rustfmt and local Markdown links")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--format-only", action="store_true", help="Only Rustfmt and local Markdown links")
+    mode.add_argument("--tests-only", action="store_true", help="Functional tests and isolated performance tests")
     args = parser.parse_args()
     try:
         channel = pinned_channel()
     except (OSError, ValueError) as error:
         print(error, file=sys.stderr)
         return 1
-    return execute(commands(channel, args.format_only))
+    if args.format_only:
+        return execute(commands(channel, True))
+    if args.tests_only:
+        return execute(test_commands(channel)) if verify_performance_tests(channel) else 1
+    # Preserve the preflight order: format, docs, check, lint, test, release.
+    checks = commands(channel)
+    result = execute(checks[:4])
+    if result:
+        return result
+    if not verify_performance_tests(channel):
+        return 1
+    return execute(checks[4:])
 
 
 if __name__ == "__main__":
