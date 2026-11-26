@@ -122,7 +122,7 @@ mod tests {
             for palette in Palette::ALL {
                 let ctx = egui::Context::default();
                 theme::apply_appearance(&ctx, Appearance { theme, palette });
-                let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                     section_heading(ui, "Test");
                     let _ = ui.add(primary_button(ui, "Start"));
                     let _ = ui.add(danger_button(ui, "Stop", true));
@@ -144,6 +144,8 @@ mod tests {
                     section_divider(ui);
                     empty_state(ui, "No results");
                 });
+                // No renderer in this headless test; discard texture updates explicitly.
+                output.textures_delta.clear();
                 assert!(!output.shapes.is_empty());
             }
         }
