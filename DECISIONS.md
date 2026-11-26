@@ -26,6 +26,7 @@
 | DEC-015 | 2026-11-26: ENG-01 утверждён | Rust 1.100.0 / MSRV 1.95.0, locked builds, preflight, CI/Performance QA, Cargo Audit/Deny, Dependabot, AGENTS.md, Quality Gate/Rulesets; выделить ResultsStore, ResultsProjection, SelectionState; этапы A–D перед UI-03.6. [ENGINEERING.md](ENGINEERING.md) |
 | DEC-016 | 2026-11-26: ENG-01.C утверждён | C1–C4: инкапсулированное хранилище, staged projection, типизированный выбор и стабильные EndpointId, Live Performance QA; замена get_if_addrs отдельным PR. Windows-first CI; Linux/macOS сборки отложены до финальной приёмки и релиза. |
 | DEC-017 | 2026-11-26: ENG-01.C2 утверждён | Вариант B, revision-based cache, поэтапная инвалидация, метрики и тесты эквивалентности; устранение повторных проверок поиска; UX preserve, Windows-first CI. C3 selection и C4 live QA отдельно. |
+| DEC-018 | 2026-11-27: ENG-01.C3 утверждён | Typed SelectionState: None / Host(IpAddr) / Endpoint(EndpointId); сохранить выбор вне фильтра и при сворачивании, типизированные ограничения команд, Ports boundary navigation, регрессионные тесты и Performance QA, Windows-first, без редизайна. |
 
 ## Изучить до внедрения
 

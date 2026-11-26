@@ -136,14 +136,16 @@ impl ResultsStore {
         })
     }
 
-    pub fn resolve(&self, id: EndpointId) -> Option<&ScanResult> {
-        if id.generation != self.generation {
-            return None;
-        }
-        self.rows.get(id.index).map(|row| &row.raw)
+    /// Resolve a session-scoped identity to a current storage index, never a table position.
+    pub fn index_of(&self, id: EndpointId) -> Option<usize> {
+        (id.generation == self.generation && id.index < self.rows.len()).then_some(id.index)
     }
 
-    /// Compatibility with the index-based projection until C2/C3.
+    pub fn resolve(&self, id: EndpointId) -> Option<&ScanResult> {
+        self.index_of(id).map(|index| &self.rows[index].raw)
+    }
+
+    /// Compatibility with the index-based projection.
     pub fn get(&self, index: usize) -> Option<&ScanResult> {
         self.resolve(self.id_at(index)?)
     }

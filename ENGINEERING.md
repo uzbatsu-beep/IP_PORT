@@ -59,3 +59,6 @@ Routine PR and main CI now builds/tests Windows x64 only; MSRV check moves to Wi
 
 
 DEC-017: C2 variant B approved, keep Windows-first, preserve UX and algorithm semantics, use revision keys and stage counters, remove duplicated protocol/state search checks. Existing counters and timing gates stay intact. No incremental insertion algorithm, new UI or dependency changes.
+
+
+DEC-018: C3 typed selection approved. Keep selection outside filters and collapsed groups, typed action guards, Ports boundary navigation, Windows-first CI and current layout. C4 live performance and D acceptance remain separate. No dependency changes.

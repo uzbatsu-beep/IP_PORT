@@ -60,3 +60,6 @@ ENG-01.B: the existing isolated debug tests remain unchanged; optimized matrix i
 
 
 ENG-01.C2 adds headless projection equivalence against the previous full-rebuild algorithm across sort/filter/expansion transitions, stage-specific invalidation, and metadata update tests. The existing combined filters, host grouping, RTT, 100k and optimized scenarios remain mandatory. Steady-state optimized frames must not change any projection counter. See [PERFORMANCE.md](PERFORMANCE.md).
+
+
+ENG-01.C3: independent SelectionState tests cover host independence, repeated observation IDs, stale IDs and invalid host transitions. App regressions cover sorting/filtering, live insertion, metadata invalidation, collapse, cache reuse, clear/new scan, failed spawn, host copy and endpoint command guards, and Ports boundary navigation. Existing keyboard, resize, navigation and load tests are adapted to the typed API; timing gates remain unchanged. Manual UI acceptance remains pending.

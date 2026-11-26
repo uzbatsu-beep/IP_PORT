@@ -127,7 +127,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     }
 
     egui::CentralPanel::default().show(ui, |ui| {
-        if app.workspace.section.has_results() && !wide && app.selected_result.is_some() {
+        if app.workspace.section.has_results() && !wide && app.selected_host().is_some() {
             egui::CollapsingHeader::new(language.text("Device inspector", "Карточка устройства"))
                 .default_open(false)
                 .show(ui, |ui| inspector(app, ui, language));
@@ -141,10 +141,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 
 fn inspector(app: &App, ui: &mut Ui, language: Language) {
     components::section_heading(ui, language.text("Device inspector", "Карточка устройства"));
-    let Some(index) = app
-        .selected_result
-        .filter(|&index| index < app.results().len())
-    else {
+    let Some(ip) = app.selected_host() else {
         ui.label(
             RichText::new(language.text(
                 "Select a result to inspect its observed host.",
@@ -154,10 +151,9 @@ fn inspector(app: &App, ui: &mut Ui, language: Language) {
         );
         return;
     };
-    let row = app.row(index);
-    let info = app.host_info().get(&row.raw.ip);
+    let info = app.host_info().get(&ip);
     let unavailable = language.text("Not observed", "Нет наблюдения");
-    ui.label(RichText::new(&row.ip_text).monospace().strong());
+    ui.label(RichText::new(ip.to_string()).monospace().strong());
     ui.label(
         RichText::new(language.text(
             "Observed IP host; physical identity unverified.",
@@ -194,13 +190,14 @@ fn inspector(app: &App, ui: &mut Ui, language: Language) {
         ));
     }
     components::section_divider(ui);
-    if app.selected_host_only {
+    let Some(index) = app.selected_endpoint_index() else {
         ui.label(language.text(
             "Select an endpoint to inspect its service.",
             "Выберите порт для просмотра сервиса.",
         ));
         return;
-    }
+    };
+    let row = app.row(index);
     ui.label(RichText::new(language.text("Selected endpoint", "Выбранный порт")).strong());
     ui.label(format!("{}/{}", row.port_text, row.protocol_text));
     ui.label(row.state_text);
@@ -233,7 +230,7 @@ mod tests {
             crate::scanner::probe::service_name(80),
             Duration::from_millis(1),
         ));
-        app.selected_result = Some(0);
+        app.select_endpoint(0);
         app.view_mode = ResultsViewMode::Flat;
         select_section(&mut app, Section::Devices);
         assert_eq!(app.view_mode, ResultsViewMode::Flat);
@@ -241,7 +238,7 @@ mod tests {
         select_section(&mut app, Section::Discovery);
         assert_eq!(app.targets_input, targets);
         assert_eq!(app.results().len(), 1);
-        assert_eq!(app.selected_result, Some(0));
+        assert_eq!(app.selected_endpoint_index(), Some(0));
     }
 
     #[test]
@@ -253,7 +250,7 @@ mod tests {
             crate::scanner::probe::service_name(80),
             Duration::from_millis(1),
         ));
-        app.selected_result = Some(0);
+        app.select_endpoint(0);
         assert!(!wide_layout(880.0));
         assert!(wide_layout(1180.0));
         for language in [Language::English, Language::Russian] {
@@ -273,7 +270,7 @@ mod tests {
                     let mut output = ctx.run_ui(input, |ui| app.update_ui(ui));
                     output.textures_delta.clear();
                     assert!(!output.shapes.is_empty());
-                    assert_eq!(app.selected_result, Some(0));
+                    assert_eq!(app.selected_endpoint_index(), Some(0));
                     assert_eq!(app.results().len(), 1);
                 }
             }

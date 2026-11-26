@@ -9,6 +9,11 @@
 
 ## [Unreleased]
 
+### ENG-01.C3 — Typed SelectionState
+- Replace coupled selection fields with None / Host(IpAddr) / Endpoint(EndpointId), generation-checked resolution and explicit command guards.
+- Preserve selection across projection changes and collapse; distinguish host/endpoint outside-filter warnings and use boundary navigation in Ports for host-only selection.
+- Add selection and lifecycle regressions; no UI redesign, dependency or CI policy changes.
+
 ### ENG-01.C2 — Managed ResultsProjection
 - Extract filtering, sorting, grouping and cached virtualized row projections from App; stage-specific invalidation and store/metadata revisions.
 - Preserve stable endpoint ordering, host expansion, selection and current UX; remove duplicate ASCII search predicates.
