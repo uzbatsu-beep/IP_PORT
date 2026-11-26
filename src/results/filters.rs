@@ -47,25 +47,23 @@ pub(super) fn filter_indices(
     let service_filter = settings.filters.service.trim().to_ascii_lowercase();
     indices.clear();
     for (idx, row) in rows.iter().enumerate() {
-        let info_matches =
-            info.get(&row.raw.ip).is_some_and(|info| {
-                info.hostname
+        let info_matches = info.get(&row.raw.ip).is_some_and(|info| {
+            info.hostname
+                .as_deref()
+                .is_some_and(|value| contains_ascii_case_insensitive(value, &query_lower))
+                || info
+                    .mac
                     .as_deref()
                     .is_some_and(|value| contains_ascii_case_insensitive(value, &query_lower))
-                    || info.mac.as_deref().is_some_and(|value| {
-                        contains_ascii_case_insensitive(value, &query_lower)
-                    })
-                    || info.vendor.as_deref().is_some_and(|value| {
-                        contains_ascii_case_insensitive(value, &query_lower)
-                    })
-            });
+                || info
+                    .vendor
+                    .as_deref()
+                    .is_some_and(|value| contains_ascii_case_insensitive(value, &query_lower))
+        });
         if (row.matches_lowercase_query(&query_lower) || info_matches)
-            && settings.filters.matches(
-                row,
-                info.get(&row.raw.ip),
-                &vendor_filter,
-                &service_filter,
-            )
+            && settings
+                .filters
+                .matches(row, info.get(&row.raw.ip), &vendor_filter, &service_filter)
         {
             indices.push(idx);
         }

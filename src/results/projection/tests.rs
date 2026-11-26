@@ -16,25 +16,23 @@ fn legacy(
     let service_filter = settings.filters.service.trim().to_ascii_lowercase();
     let mut indices = Vec::new();
     for (idx, row) in rows.iter().enumerate() {
-        let info_matches =
-            info.get(&row.raw.ip).is_some_and(|info| {
-                info.hostname
+        let info_matches = info.get(&row.raw.ip).is_some_and(|info| {
+            info.hostname
+                .as_deref()
+                .is_some_and(|value| contains_ascii_case_insensitive(value, &query_lower))
+                || info
+                    .mac
                     .as_deref()
                     .is_some_and(|value| contains_ascii_case_insensitive(value, &query_lower))
-                    || info.mac.as_deref().is_some_and(|value| {
-                        contains_ascii_case_insensitive(value, &query_lower)
-                    })
-                    || info.vendor.as_deref().is_some_and(|value| {
-                        contains_ascii_case_insensitive(value, &query_lower)
-                    })
-            });
+                || info
+                    .vendor
+                    .as_deref()
+                    .is_some_and(|value| contains_ascii_case_insensitive(value, &query_lower))
+        });
         if (row.matches_lowercase_query(&query_lower) || info_matches)
-            && settings.filters.matches(
-                row,
-                info.get(&row.raw.ip),
-                &vendor_filter,
-                &service_filter,
-            )
+            && settings
+                .filters
+                .matches(row, info.get(&row.raw.ip), &vendor_filter, &service_filter)
         {
             indices.push(idx);
         }
@@ -94,7 +92,11 @@ fn legacy(
             }
         }
         .then_with(|| a.ip.cmp(&b.ip));
-        if settings.host_sort_ascending { order } else { order.reverse() }
+        if settings.host_sort_ascending {
+            order
+        } else {
+            order.reverse()
+        }
     });
     (indices, groups)
 }
@@ -109,12 +111,14 @@ fn fixture() -> ResultsStore {
         ("2001:db8::1", 502, "modbus", 7),
         ("10.0.0.3", 502, "unknown", 7),
     ] {
-        store.insert(ScanResult::new(
-            ip.parse().unwrap(),
-            port,
-            service,
-            Duration::from_millis(ms),
-        )).unwrap();
+        store
+            .insert(ScanResult::new(
+                ip.parse().unwrap(),
+                port,
+                service,
+                Duration::from_millis(ms),
+            ))
+            .unwrap();
     }
     store
 }
@@ -155,11 +159,21 @@ fn all_sort_transitions_and_filters_match_legacy() {
         projection.settings.results_filter = query.to_owned();
         for transport in [None, Some(ScanProtocol::Tcp), Some(ScanProtocol::Udp)] {
             projection.settings.filters.transport = transport;
-            for sort in [SortColumn::Address, SortColumn::Port, SortColumn::Service, SortColumn::Latency] {
+            for sort in [
+                SortColumn::Address,
+                SortColumn::Port,
+                SortColumn::Service,
+                SortColumn::Latency,
+            ] {
                 projection.settings.sort_column = sort;
                 for ascending in [false, true] {
                     projection.settings.sort_ascending = ascending;
-                    for host_sort in [HostSort::Address, HostSort::Vendor, HostSort::Endpoints, HostSort::Rtt] {
+                    for host_sort in [
+                        HostSort::Address,
+                        HostSort::Vendor,
+                        HostSort::Endpoints,
+                        HostSort::Rtt,
+                    ] {
                         projection.settings.host_sort = host_sort;
                         for host_ascending in [false, true] {
                             projection.settings.host_sort_ascending = host_ascending;
@@ -192,7 +206,10 @@ fn invalidation_is_stage_specific() {
     assert_legacy(&mut projection, &store, &info);
     let expanded = projection.metrics();
     assert_eq!(expanded.view_rebuilds, host_sort.view_rebuilds);
-    assert_eq!(expanded.device_row_rebuilds, host_sort.device_row_rebuilds + 1);
+    assert_eq!(
+        expanded.device_row_rebuilds,
+        host_sort.device_row_rebuilds + 1
+    );
     projection.settings.sort_column = SortColumn::Latency;
     assert_legacy(&mut projection, &store, &info);
     let ports = projection.metrics();
@@ -200,25 +217,32 @@ fn invalidation_is_stage_specific() {
     assert_eq!(ports.port_sorts, expanded.port_sorts + 1);
     assert_eq!(ports.group_rebuilds, expanded.group_rebuilds + 1);
     let old = projection.metrics();
-    store.insert(ScanResult::new(
-        "10.0.0.9".parse().unwrap(),
-        102,
-        "unknown",
-        Duration::from_millis(5),
-    )).unwrap();
+    store
+        .insert(ScanResult::new(
+            "10.0.0.9".parse().unwrap(),
+            102,
+            "unknown",
+            Duration::from_millis(5),
+        ))
+        .unwrap();
     assert_legacy(&mut projection, &store, &info);
-    assert_eq!(projection.metrics().filter_rebuilds, old.filter_rebuilds + 1);
+    assert_eq!(
+        projection.metrics().filter_rebuilds,
+        old.filter_rebuilds + 1
+    );
     store.clear();
     projection.clear(&store);
     assert_legacy(&mut projection, &store, &info);
     assert!(projection.device_rows().is_empty());
     assert!(!projection.host_expanded("10.0.0.1".parse().unwrap()));
-    store.insert(ScanResult::new(
-        "10.0.0.9".parse().unwrap(),
-        502,
-        "modbus",
-        Duration::from_millis(1),
-    )).unwrap();
+    store
+        .insert(ScanResult::new(
+            "10.0.0.9".parse().unwrap(),
+            502,
+            "modbus",
+            Duration::from_millis(1),
+        ))
+        .unwrap();
     assert_legacy(&mut projection, &store, &info);
     assert_eq!(projection.visible_indices(), &[0]);
     assert_eq!(store.snapshot()[0].port, 502);
@@ -244,7 +268,10 @@ fn metadata_changes_refresh_matching_and_vendor_sort() {
     );
     projection.invalidate_metadata();
     assert_legacy(&mut projection, &store, &info);
-    assert_eq!(projection.metrics().filter_rebuilds, initial.filter_rebuilds + 1);
+    assert_eq!(
+        projection.metrics().filter_rebuilds,
+        initial.filter_rebuilds + 1
+    );
     assert_eq!(projection.visible_indices(), &[2, 1, 3]);
     projection.settings.results_filter.clear();
     projection.settings.filters.vendor = "SIEMENS".to_owned();

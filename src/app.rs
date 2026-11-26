@@ -6,22 +6,22 @@ use std::time::{Duration, Instant};
 use crate::host_info::{HostInfo, HostInfoEvent, HostInfoWorker, PtrStatus};
 use crate::oui_registry::OuiRegistry;
 use crate::oui_store::{ImportedOui, RestoredOui};
+use crate::results::grouping::HostGroup;
+use crate::results::projection::ResultsProjection;
 #[cfg(test)]
 use crate::results::store::MAX_STORED_RESULTS;
 pub use crate::results::store::ResultRow;
-use crate::results::grouping::HostGroup;
-use crate::results::projection::ResultsProjection;
 use crate::results::store::ResultsStore;
 pub use crate::results::{
     filters::ResultFilters,
     grouping::DeviceRow,
     sorting::{HostSort, SortColumn},
 };
+#[cfg(test)]
+use crate::scanner::PortState;
 use crate::scanner::{
     self, ProbeCounts, ScanConfig, ScanEvent, ScanHandle, ScanProtocol, ScanResult,
 };
-#[cfg(test)]
-use crate::scanner::PortState;
 use crate::scanner::{scope::Exclusions, targets};
 use crate::ui;
 
@@ -859,7 +859,8 @@ impl App {
         let ip = self.results.rows().get(index)?.raw.ip;
         if !self.selected_host_only
             && self.host_expanded(ip)
-            && let Some(pos) = self.device_rows()
+            && let Some(pos) = self
+                .device_rows()
                 .iter()
                 .position(|row| *row == DeviceRow::Endpoint(index))
         {
@@ -1458,7 +1459,8 @@ impl App {
                 let next_index = match self.selected_result {
                     None => self.visible_indices()[0],
                     Some(current) => {
-                        let pos = self.visible_indices()
+                        let pos = self
+                            .visible_indices()
                             .iter()
                             .position(|&idx| idx == current)
                             .unwrap_or(0);
@@ -1473,7 +1475,8 @@ impl App {
                 let prev_index = match self.selected_result {
                     None => *self.visible_indices().last().unwrap(),
                     Some(current) => {
-                        let pos = self.visible_indices()
+                        let pos = self
+                            .visible_indices()
                             .iter()
                             .position(|&idx| idx == current)
                             .unwrap_or(0);

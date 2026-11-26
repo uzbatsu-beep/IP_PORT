@@ -143,14 +143,26 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 fn filters(app: &mut App, ui: &mut Ui, lang: Language) {
     ui.horizontal_wrapped(|ui| {
         ui.label(lang.text("OUI owner", "Владелец OUI"));
-        ui.add(egui::TextEdit::singleline(&mut app.projection.settings.filters.vendor).desired_width(120.0));
+        ui.add(
+            egui::TextEdit::singleline(&mut app.projection.settings.filters.vendor)
+                .desired_width(120.0),
+        );
         ui.label(lang.text("Service", "Сервис"));
-        ui.add(egui::TextEdit::singleline(&mut app.projection.settings.filters.service).desired_width(100.0));
+        ui.add(
+            egui::TextEdit::singleline(&mut app.projection.settings.filters.service)
+                .desired_width(100.0),
+        );
     });
     ui.horizontal_wrapped(|ui| {
         let all = lang.text("All", "Все");
         egui::ComboBox::from_id_salt("filter_transport")
-            .selected_text(app.projection.settings.filters.transport.map_or(all, ScanProtocol::as_str))
+            .selected_text(
+                app.projection
+                    .settings
+                    .filters
+                    .transport
+                    .map_or(all, ScanProtocol::as_str),
+            )
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut app.projection.settings.filters.transport, None, all);
                 for protocol in [ScanProtocol::Tcp, ScanProtocol::Udp] {
@@ -162,11 +174,21 @@ fn filters(app: &mut App, ui: &mut Ui, lang: Language) {
                 }
             });
         egui::ComboBox::from_id_salt("filter_state")
-            .selected_text(app.projection.settings.filters.state.map_or(all, PortState::as_str))
+            .selected_text(
+                app.projection
+                    .settings
+                    .filters
+                    .state
+                    .map_or(all, PortState::as_str),
+            )
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut app.projection.settings.filters.state, None, all);
                 for state in [PortState::Open, PortState::OpenFiltered] {
-                    ui.selectable_value(&mut app.projection.settings.filters.state, Some(state), state.as_str());
+                    ui.selectable_value(
+                        &mut app.projection.settings.filters.state,
+                        Some(state),
+                        state.as_str(),
+                    );
                 }
             });
         egui::ComboBox::from_id_salt("filter_evidence")
