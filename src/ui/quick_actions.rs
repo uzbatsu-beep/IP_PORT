@@ -255,10 +255,10 @@ pub fn show_row_context_menu(app: &mut App, entry: &ResultRow, ui: &mut egui::Ui
 }
 
 /// Отображает нижнюю панель быстрых действий для выделенной строки.
-pub fn show_inspector_toolbar(app: &mut App, entry_idx: usize, ui: &mut Ui) {
-    if entry_idx >= app.results().len() {
+pub fn show_inspector_toolbar(app: &mut App, ui: &mut Ui) {
+    let Some(entry_idx) = app.selected_endpoint_index() else {
         return;
-    }
+    };
     let entry = app.row(entry_idx).clone();
     let ip = entry.raw.ip;
     let port = entry.raw.port;
@@ -335,8 +335,7 @@ pub fn show_inspector_toolbar(app: &mut App, entry_idx: usize, ui: &mut Ui) {
             }
 
             if ui.small_button("✕").on_hover_text("Deselect row").clicked() {
-                app.selected_result = None;
-                app.selected_host_only = false;
+                app.clear_selection();
             }
         });
     });
@@ -429,10 +428,12 @@ mod tests {
         );
         app.push_result(res);
         app.ensure_results_view();
+        app.select_endpoint(0);
+        assert_eq!(app.selected_endpoint_index(), Some(0));
 
         let ctx = egui::Context::default();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            show_inspector_toolbar(&mut app, 0, ui);
+            show_inspector_toolbar(&mut app, ui);
             let entry = app.row(0).clone();
             ui.menu_button("Test Menu", |ui| {
                 show_row_context_menu(&mut app, &entry, ui);

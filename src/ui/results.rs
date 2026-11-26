@@ -85,17 +85,20 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         {
             app.collapse_hosts();
         }
-        if let Some(index) = app.selected_result
-            && !app.visible_indices().contains(&index)
-        {
-            ui.label(
-                RichText::new(lang.text(
+        if let Some(ip) = app.selected_host() {
+            let warning = if let Some(index) = app.selected_endpoint_index() {
+                (!app.visible_indices().contains(&index)).then_some(lang.text(
                     "Selected endpoint outside filter",
                     "Выбранный порт вне фильтра",
                 ))
-                .weak()
-                .small(),
-            );
+            } else {
+                (!app.host_groups().iter().any(|group| group.ip == ip)).then_some(
+                    lang.text("Selected host outside filter", "Выбранный узел вне фильтра"),
+                )
+            };
+            if let Some(warning) = warning {
+                ui.label(RichText::new(warning).weak().small());
+            }
         }
     });
     ui.separator();
@@ -129,9 +132,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         return;
     }
     // Reserve space for the selected-endpoint actions below the scrollable table.
-    if let Some(index) = app.selected_result.filter(|_| !app.selected_host_only) {
-        crate::ui::quick_actions::show_inspector_toolbar(app, index, ui);
-    }
+    crate::ui::quick_actions::show_inspector_toolbar(app, ui);
     if app.view_mode == ResultsViewMode::GroupedByHost {
         app.ensure_device_rows();
         render_devices(app, ui, lang);
@@ -346,7 +347,7 @@ fn render_ports(app: &mut App, ui: &mut Ui, lang: Language) {
             if app.scroll_to_selected {
                 app.scroll_to_selected = false;
                 if let Some(pos) = app
-                    .selected_result
+                    .selected_endpoint_index()
                     .and_then(|idx| app.visible_indices().iter().position(|&i| i == idx))
                 {
                     table = table.scroll_to_row(pos, Some(Align::Center));
@@ -387,9 +388,7 @@ fn render_ports(app: &mut App, ui: &mut Ui, lang: Language) {
                     body.rows(components::TABLE_ROW_HEIGHT, len, |mut row| {
                         let index = app.visible_indices()[row.index()];
                         let entry = app.row(index).clone();
-                        row.set_selected(
-                            app.selected_result == Some(index) && !app.selected_host_only,
-                        );
+                        row.set_selected(app.selected_endpoint_index() == Some(index));
                         row.col(|ui| {
                             let info = app.host_info().get(&entry.raw.ip);
                             let address = info.and_then(|i| i.hostname.as_deref()).map_or_else(
@@ -509,9 +508,7 @@ fn render_devices(app: &mut App, ui: &mut Ui, lang: Language) {
                                     .unwrap_or("—")
                                     .to_owned();
                                 let ambiguous = info.is_some_and(|i| i.neighbor_ambiguous);
-                                let selected = app.selected_result.is_some_and(|idx| {
-                                    app.results().get(idx).is_some_and(|result| result.ip == ip)
-                                });
+                                let selected = app.selected_host() == Some(ip);
                                 row.set_selected(selected);
                                 let mut toggle = false;
                                 row.col(|ui| {
@@ -620,9 +617,7 @@ fn render_devices(app: &mut App, ui: &mut Ui, lang: Language) {
                             }
                             DeviceRow::Endpoint(index) => {
                                 let entry = app.row(index).clone();
-                                row.set_selected(
-                                    app.selected_result == Some(index) && !app.selected_host_only,
-                                );
+                                row.set_selected(app.selected_endpoint_index() == Some(index));
                                 row.col(|ui| {
                                     cell(
                                         ui,

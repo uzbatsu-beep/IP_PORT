@@ -8,6 +8,7 @@ use crate::oui_registry::OuiRegistry;
 use crate::oui_store::{ImportedOui, RestoredOui};
 use crate::results::grouping::HostGroup;
 use crate::results::projection::ResultsProjection;
+use crate::results::selection::SelectionState;
 #[cfg(test)]
 use crate::results::store::MAX_STORED_RESULTS;
 pub use crate::results::store::ResultRow;
@@ -260,8 +261,7 @@ pub struct App {
     pub status_level: StatusLevel,
     results: ResultsStore,
     pub projection: ResultsProjection,
-    pub selected_host_only: bool,
-    pub selected_result: Option<usize>,
+    selection: SelectionState,
     pub view_mode: ResultsViewMode,
 
     pub target_count: usize,
@@ -348,8 +348,7 @@ impl App {
             status_level: StatusLevel::Idle,
             results: ResultsStore::default(),
             projection: ResultsProjection::default(),
-            selected_host_only: false,
-            selected_result: None,
+            selection: SelectionState::default(),
             view_mode: ResultsViewMode::Flat,
             target_count: 0,
             port_count: 0,
@@ -488,7 +487,6 @@ impl App {
 
         self.clear_results_storage();
         self.start_host_enrichment();
-        self.selected_result = None;
         self.target_count = preview.targets;
         self.port_count = preview.ports;
         self.total_probes = preview.probes;
@@ -837,27 +835,33 @@ impl App {
     }
 
     pub fn select_endpoint(&mut self, index: usize) {
-        self.selected_result = Some(index);
-        self.selected_host_only = false;
+        if let Some(id) = self.results.id_at(index) {
+            self.selection.select_endpoint(id, &self.results);
+        }
     }
 
     pub fn select_host(&mut self, group_index: usize) {
-        let group = &self.host_groups()[group_index];
-        if !self.selected_result.is_some_and(|idx| {
-            self.results
-                .rows()
-                .get(idx)
-                .is_some_and(|r| r.raw.ip == group.ip)
-        }) {
-            self.selected_result = group.indices.first().copied();
+        if let Some(group) = self.projection.host_groups().get(group_index) {
+            self.selection.select_host(group.ip, &self.results);
         }
-        self.selected_host_only = true;
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selection.clear();
+        self.scroll_to_selected = false;
+    }
+
+    pub fn selected_host(&self) -> Option<IpAddr> {
+        self.selection.host(&self.results)
+    }
+
+    pub fn selected_endpoint_index(&self) -> Option<usize> {
+        self.selection.endpoint_index(&self.results)
     }
 
     pub fn selected_device_position(&self) -> Option<usize> {
-        let index = self.selected_result?;
-        let ip = self.results.rows().get(index)?.raw.ip;
-        if !self.selected_host_only
+        let ip = self.selected_host()?;
+        if let Some(index) = self.selected_endpoint_index()
             && self.host_expanded(ip)
             && let Some(pos) = self
                 .device_rows()
@@ -1146,7 +1150,7 @@ impl App {
     pub(crate) fn clear_results_storage(&mut self) {
         self.results.clear();
         self.projection.clear(&self.results);
-        self.selected_host_only = false;
+        self.clear_selection();
         self.host_info.clear();
         self.host_info_pending.clear();
         self.host_info_backlog.clear();
@@ -1156,7 +1160,6 @@ impl App {
         self.host_info_worker = None;
         self.cached_rtt_stats = None;
         self.cached_rtt_revision = None;
-        self.selected_result = None;
     }
 
     pub fn set_status(&mut self, level: StatusLevel, status: String) {
@@ -1394,18 +1397,10 @@ impl App {
                 commands::execute(self, ui.ctx(), action);
             }
         }
-        if copy_requested
-            && let Some(index) = self.selected_result
-            && let Some(result) = self.results.get(index)
-        {
-            let text = if self.selected_host_only {
-                result.ip.to_string()
-            } else {
-                format!("{}:{}", result.ip, result.port)
-            };
+        if copy_requested && let Some(text) = self.selection.copy_text(&self.results) {
             self.copy_text_with_toast(ui.ctx(), text.clone(), format!("Copied {text}"));
         }
-        if copy_requested && self.selected_result.is_none() && !self.results.is_empty() {
+        if copy_requested && self.selection.is_none() && !self.results.is_empty() {
             let all_results = self
                 .results
                 .iter()
@@ -1456,7 +1451,7 @@ impl App {
             }
         } else {
             if arrow_down && !self.visible_indices().is_empty() {
-                let next_index = match self.selected_result {
+                let next_index = match self.selected_endpoint_index() {
                     None => self.visible_indices()[0],
                     Some(current) => {
                         let pos = self
@@ -1472,7 +1467,7 @@ impl App {
                 self.scroll_to_selected = true;
             }
             if arrow_up && !self.visible_indices().is_empty() {
-                let prev_index = match self.selected_result {
+                let prev_index = match self.selected_endpoint_index() {
                     None => *self.visible_indices().last().unwrap(),
                     Some(current) => {
                         let pos = self
@@ -1501,11 +1496,7 @@ impl App {
             && !text_input_focused
             && !command
             && ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space));
-        if row_action_requested
-            && !self.selected_host_only
-            && let Some(index) = self.selected_result
-            && let Some(result) = self.results.get(index)
-        {
+        if row_action_requested && let Some(result) = self.selection.endpoint(&self.results) {
             if let Some(url) = crate::ui::quick_actions::web_url_for(
                 result.ip,
                 result.port,
@@ -1615,7 +1606,7 @@ mod tests {
         let mut app = App::default_state();
         let (tx, _terminal_tx, cancel) = attach_mock_scan(&mut app);
         app.push_result(sample_result(1, 80, "http", 1));
-        app.selected_result = Some(0);
+        app.select_endpoint(0);
         app.projection.settings.results_filter = "http".to_owned();
         let targets = app.targets_input.clone();
         let ctx = egui::Context::default();
@@ -1633,7 +1624,7 @@ mod tests {
             assert!(!output.shapes.is_empty());
             assert!(app.is_running());
             assert!(!cancel.is_cancelled());
-            assert_eq!(app.selected_result, Some(0));
+            assert_eq!(app.selected_endpoint_index(), Some(0));
             assert_eq!(app.projection.settings.results_filter, "http");
             assert_eq!(app.targets_input, targets);
             assert!(!tx.is_closed());
@@ -1976,8 +1967,12 @@ mod tests {
         app.drain_events_with_budget(10);
         assert_eq!(app.results.len(), 1);
 
+        app.select_endpoint(0);
+        let original = app.results.id_at(0).unwrap();
         app.clear_results();
         assert!(app.results.is_empty());
+        assert!(app.selected_host().is_none());
+        assert!(app.results.resolve(original).is_none());
         assert!(app.is_running());
 
         tx.blocking_send(ScanEvent::Open(sample_result(1, 80, "http", 4)))
@@ -2003,7 +1998,7 @@ mod tests {
 
         app.drain_events_with_budget(10);
         assert_eq!(app.results.len(), 1);
-        assert_eq!(app.results.get(0).unwrap().port, 80);
+        assert_eq!(app.results.rows()[0].raw.port, 80);
     }
 
     #[test]
@@ -2138,14 +2133,150 @@ mod tests {
         let mut app = App::default_state();
         assert!(app.can_start_scan());
 
+        app.push_result(sample_result(1, 80, "http", 1));
+        app.select_endpoint(0);
+        let original = app.results.id_at(0).unwrap();
         app.start_scan_with(|_config| {
             Err("Failed to start scanner thread: synthetic OS error".to_owned())
         });
+        assert_eq!(app.selected_endpoint_index(), Some(0));
+        assert_eq!(app.results.id_at(0), Some(original));
 
         assert_eq!(app.status_level, StatusLevel::Error);
         assert!(app.status.contains("Failed to start scanner thread"));
         assert!(app.status.contains("synthetic OS error"));
         assert!(!app.is_running());
+    }
+
+    #[test]
+    fn selection_survives_projection_changes_and_live_ingestion() {
+        let mut app = App::default_state();
+        app.push_result(sample_result(2, 443, "https", 4));
+        app.push_result(sample_result(1, 80, "http", 2));
+        app.push_result(sample_result(1, 22, "ssh", 1));
+        app.ensure_device_rows();
+        let ip = app.results.rows()[1].raw.ip;
+        let id = app.results.id_at(1).unwrap();
+        let metrics = app.projection.metrics();
+        app.select_endpoint(1);
+        app.ensure_device_rows();
+        assert_eq!(app.projection.metrics(), metrics);
+        assert_eq!(app.selected_host(), Some(ip));
+        assert_eq!(app.selected_endpoint_index(), Some(1));
+        app.toggle_host(ip);
+        app.ensure_device_rows();
+        let pos = app.selected_device_position().unwrap();
+        assert_eq!(app.device_rows()[pos], DeviceRow::Endpoint(1));
+        app.toggle_host(ip);
+        app.ensure_device_rows();
+        let pos = app.selected_device_position().unwrap();
+        assert!(matches!(app.device_rows()[pos], DeviceRow::Host(_)));
+        assert_eq!(app.selected_endpoint_index(), Some(1));
+        app.projection.settings.sort_column = SortColumn::Port;
+        app.projection.settings.sort_ascending = false;
+        app.projection.settings.results_filter = "missing".to_owned();
+        app.ensure_device_rows();
+        assert!(app.visible_indices().is_empty());
+        assert!(app.selected_device_position().is_none());
+        assert_eq!(app.selected_host(), Some(ip));
+        app.push_result(sample_result(1, 502, "modbus", 3));
+        app.projection.invalidate_metadata();
+        app.projection.settings.results_filter.clear();
+        app.ensure_device_rows();
+        assert_eq!(app.selected_endpoint_index(), Some(1));
+        assert_eq!(app.results.id_at(1), Some(id));
+        app.view_mode = ResultsViewMode::Flat;
+        assert_eq!(app.selected_endpoint_index(), Some(1));
+        app.clear_results();
+        assert!(app.selected_host().is_none());
+        assert!(app.selected_endpoint_index().is_none());
+        assert!(app.results.resolve(id).is_none());
+    }
+
+    #[test]
+    fn host_selection_keyboard_copy_and_ports_boundary() {
+        let mut app = App::default_state();
+        app.workspace.section = crate::ui::navigation::Section::Devices;
+        app.view_mode = ResultsViewMode::Flat;
+        app.push_result(sample_result(1, 80, "http", 2));
+        app.push_result(sample_result(2, 443, "https", 4));
+        app.push_result(sample_result(3, 22, "ssh", 1));
+        app.ensure_device_rows();
+        let group = app
+            .host_groups()
+            .iter()
+            .position(|group| group.ip == IpAddr::from([10, 0, 0, 2]))
+            .unwrap();
+        app.select_host(group);
+        assert_eq!(app.selected_host(), Some(IpAddr::from([10, 0, 0, 2])));
+        assert!(app.selected_endpoint_index().is_none());
+        let key_frame = |app: &mut App, key: egui::Key, modifiers: egui::Modifiers| {
+            let ctx = egui::Context::default();
+            crate::ui::theme::apply(&ctx);
+            run_headless_frame(
+                app,
+                &ctx,
+                egui::vec2(1180.0, 760.0),
+                1.0,
+                vec![
+                    egui::Event::ModifiersChanged(modifiers),
+                    egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    },
+                ],
+            )
+        };
+        let output = key_frame(
+            &mut app,
+            egui::Key::C,
+            egui::Modifiers {
+                ctrl: true,
+                command: true,
+                ..Default::default()
+            },
+        );
+        assert!(output.platform_output.commands.iter().any(|cmd| matches!(
+            cmd,
+            egui::OutputCommand::CopyText(text) if text == "10.0.0.2"
+        )));
+        for key in [egui::Key::Enter, egui::Key::Space] {
+            let output = key_frame(&mut app, key, egui::Modifiers::default());
+            assert!(output.platform_output.commands.iter().all(|cmd| !matches!(
+                cmd,
+                egui::OutputCommand::OpenUrl(_) | egui::OutputCommand::CopyText(_)
+            )));
+            assert!(app.selected_endpoint_index().is_none());
+        }
+        key_frame(&mut app, egui::Key::ArrowDown, egui::Modifiers::default());
+        assert_eq!(
+            app.selected_endpoint_index(),
+            app.visible_indices().first().copied()
+        );
+        app.select_host(group);
+        key_frame(&mut app, egui::Key::ArrowUp, egui::Modifiers::default());
+        assert_eq!(
+            app.selected_endpoint_index(),
+            app.visible_indices().last().copied()
+        );
+    }
+
+    #[test]
+    fn successful_new_scan_clears_selection_and_old_endpoint_id() {
+        let mut app = App::default_state();
+        app.push_result(sample_result(1, 80, "http", 1));
+        app.select_endpoint(0);
+        let old = app.results.id_at(0).unwrap();
+        app.start_scan_with(mock_infinite_scan);
+        assert!(app.is_running());
+        assert!(app.selected_host().is_none());
+        assert!(app.selected_endpoint_index().is_none());
+        app.push_result(sample_result(1, 502, "modbus", 1));
+        assert!(app.results.resolve(old).is_none());
+        assert!(app.selected_host().is_none());
     }
 
     #[test]
@@ -2294,7 +2425,7 @@ mod tests {
         app.clear_results_storage();
         app.push_result(sample_result(1, 80, "http", 10));
         app.push_result(sample_result(2, 443, "https", 25));
-        app.selected_result = Some(0);
+        app.select_endpoint(0);
 
         let output1 = run_headless_frame(
             &mut app,
@@ -2327,7 +2458,7 @@ mod tests {
         assert!(app.toasts.last().unwrap().message.contains("10.0.0.1:80"));
 
         // 4. Ctrl+C without selection copies all IP:Port entries
-        app.selected_result = None;
+        app.clear_selection();
         let output2 = run_headless_frame(
             &mut app,
             &ctx,
@@ -2406,7 +2537,7 @@ mod tests {
         assert!(app.projection.settings.results_filter.is_empty());
 
         // 7. Arrow keys navigate results table
-        app.selected_result = None;
+        app.clear_selection();
         run_headless_frame(
             &mut app,
             &ctx,
@@ -2423,7 +2554,7 @@ mod tests {
                 },
             ],
         );
-        assert_eq!(app.selected_result, Some(0));
+        assert_eq!(app.selected_endpoint_index(), Some(0));
 
         run_headless_frame(
             &mut app,
@@ -2441,7 +2572,7 @@ mod tests {
                 },
             ],
         );
-        assert_eq!(app.selected_result, Some(1));
+        assert_eq!(app.selected_endpoint_index(), Some(1));
 
         // 8. ArrowUp moves back
         run_headless_frame(
@@ -2460,7 +2591,7 @@ mod tests {
                 },
             ],
         );
-        assert_eq!(app.selected_result, Some(0));
+        assert_eq!(app.selected_endpoint_index(), Some(0));
 
         // 9. End key selects last item
         run_headless_frame(
@@ -2479,7 +2610,7 @@ mod tests {
                 },
             ],
         );
-        assert_eq!(app.selected_result, Some(1));
+        assert_eq!(app.selected_endpoint_index(), Some(1));
 
         // 10. Home key selects first item
         run_headless_frame(
@@ -2498,7 +2629,7 @@ mod tests {
                 },
             ],
         );
-        assert_eq!(app.selected_result, Some(0));
+        assert_eq!(app.selected_endpoint_index(), Some(0));
 
         // 11. Enter on web port (item 0 is port 80) triggers browser open
         let output_web = run_headless_frame(
@@ -2566,7 +2697,7 @@ mod tests {
             crate::scanner::probe::service_name(80),
             Duration::from_millis(2),
         ));
-        app.selected_result = Some(0);
+        app.select_endpoint(0);
         for theme in [Theme::Light, Theme::Dark] {
             for palette in Palette::ALL {
                 let ctx = egui::Context::default();
@@ -2578,7 +2709,7 @@ mod tests {
                         run_headless_frame(&mut app, &ctx, egui::vec2(1180.0, 760.0), 1.0, vec![]);
                     assert!(!output.shapes.is_empty());
                     assert_eq!(app.results.len(), 1);
-                    assert_eq!(app.selected_result, Some(0));
+                    assert_eq!(app.selected_endpoint_index(), Some(0));
                 }
             }
         }
@@ -2710,7 +2841,7 @@ mod tests {
             elapsed.push(now.elapsed());
         }
         assert_eq!(app.view_rebuilds(), rebuilds);
-        assert_eq!(app.selected_result, Some(3));
+        assert_eq!(app.selected_endpoint_index(), Some(3));
         app.projection.settings.filters.transport = Some(ScanProtocol::Udp);
         app.ensure_device_rows();
         assert!(app.device_rows().is_empty());
@@ -2718,11 +2849,12 @@ mod tests {
         app.projection.settings.filters = ResultFilters::default();
         app.ensure_device_rows();
         assert_eq!(app.device_rows().len(), 10_010);
-        assert_eq!(app.selected_result, Some(3));
+        assert_eq!(app.selected_endpoint_index(), Some(3));
         app.select_host(0);
-        assert!(app.selected_host_only);
+        assert_eq!(app.selected_host(), Some(first));
+        assert!(app.selected_endpoint_index().is_none());
         app.select_endpoint(3);
-        assert!(!app.selected_host_only);
+        assert_eq!(app.selected_endpoint_index(), Some(3));
         println!(
             "100k endpoints / 10k hosts: total {:?}; frame samples {:?}",
             started.elapsed(),
@@ -3150,7 +3282,7 @@ mod tests {
         app.clear_results_storage();
         app.toasts.clear();
         app.push_result(sample_result(10, 8080, "http-proxy", 15));
-        app.selected_result = Some(0);
+        app.select_endpoint(0);
 
         let out_linux_c = run_headless_frame(
             &mut app,
@@ -3258,7 +3390,7 @@ mod tests {
         app.clear_results_storage();
         app.toasts.clear();
         app.push_result(sample_result(10, 8080, "http-proxy", 15));
-        app.selected_result = Some(0);
+        app.select_endpoint(0);
         let out_mac_c = run_headless_frame(
             &mut app,
             &ctx,
