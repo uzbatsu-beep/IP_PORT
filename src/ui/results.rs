@@ -92,10 +92,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     "Выбранный порт вне фильтра",
                 ))
             } else {
-                (!app.host_groups().iter().any(|group| group.ip == ip)).then_some(lang.text(
-                    "Selected host outside filter",
-                    "Выбранный узел вне фильтра",
-                ))
+                (!app.host_groups().iter().any(|group| group.ip == ip)).then_some(
+                    lang.text("Selected host outside filter", "Выбранный узел вне фильтра"),
+                )
             };
             if let Some(warning) = warning {
                 ui.label(RichText::new(warning).weak().small());
@@ -389,9 +388,7 @@ fn render_ports(app: &mut App, ui: &mut Ui, lang: Language) {
                     body.rows(components::TABLE_ROW_HEIGHT, len, |mut row| {
                         let index = app.visible_indices()[row.index()];
                         let entry = app.row(index).clone();
-                        row.set_selected(
-                            app.selected_endpoint_index() == Some(index),
-                        );
+                        row.set_selected(app.selected_endpoint_index() == Some(index));
                         row.col(|ui| {
                             let info = app.host_info().get(&entry.raw.ip);
                             let address = info.and_then(|i| i.hostname.as_deref()).map_or_else(
@@ -620,9 +617,7 @@ fn render_devices(app: &mut App, ui: &mut Ui, lang: Language) {
                             }
                             DeviceRow::Endpoint(index) => {
                                 let entry = app.row(index).clone();
-                                row.set_selected(
-                                    app.selected_endpoint_index() == Some(index),
-                                );
+                                row.set_selected(app.selected_endpoint_index() == Some(index));
                                 row.col(|ui| {
                                     cell(
                                         ui,

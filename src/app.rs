@@ -1496,8 +1496,7 @@ impl App {
             && !text_input_focused
             && !command
             && ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space));
-        if row_action_requested && let Some(result) = self.selection.endpoint(&self.results)
-        {
+        if row_action_requested && let Some(result) = self.selection.endpoint(&self.results) {
             if let Some(url) = crate::ui::quick_actions::web_url_for(
                 result.ip,
                 result.port,
@@ -2253,10 +2252,16 @@ mod tests {
             assert!(app.selected_endpoint_index().is_none());
         }
         key_frame(&mut app, egui::Key::ArrowDown, egui::Modifiers::default());
-        assert_eq!(app.selected_endpoint_index(), app.visible_indices().first().copied());
+        assert_eq!(
+            app.selected_endpoint_index(),
+            app.visible_indices().first().copied()
+        );
         app.select_host(group);
         key_frame(&mut app, egui::Key::ArrowUp, egui::Modifiers::default());
-        assert_eq!(app.selected_endpoint_index(), app.visible_indices().last().copied());
+        assert_eq!(
+            app.selected_endpoint_index(),
+            app.visible_indices().last().copied()
+        );
     }
 
     #[test]
