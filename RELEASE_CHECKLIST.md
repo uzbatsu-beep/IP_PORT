@@ -1,13 +1,13 @@
 # Чек-лист выпуска IP / PORT Scanner
 
-Используется **перед публикацией следующего тега**. Текущий официальный релиз — [v0.4.0](https://github.com/uzbatsu-beep/IP_PORT/releases/tag/v0.4.0), исходный релизный коммит `ed4f81b3ad938fe9d10e07d3165c91cb2be6e6e1`. Следующее обновление версии требует отдельного согласования.
+Используется **перед публикацией следующего тега**. Текущий официальный релиз — [v0.4.0](https://github.com/uzbatsu-beep/IP_PORT/releases/tag/v0.4.0), исходный релизный коммит `ed4f81b3ad938fe9d10e07d3165c91cb2be6e6e1`. Версия разработки 0.5.0 согласована; публикация тега требует отдельного согласования.
 
 ## 1. Готовность к выпуску
 
 - [ ] В `main` находятся только прошедшие ревью PR; нет разовых workflow или тестовых файлов выпуска
 - [ ] `Cargo.toml` содержит версию `X.Y.Z`; `Cargo.lock` синхронизирован
 - [ ] `README.md`, `ROADMAP.md`, `ARCHITECTURE.md`, `SECURITY.md`, `PACKAGING.md` и `CHANGELOG.md` актуальны
-- [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets` успешно пройдены
+- [ ] `rust-toolchain.toml` фиксирует Rust 1.100.0; полный preflight успешно пройден (format/docs, locked check/clippy/test/build); CI для точного SHA успешен
 - [ ] `python3 scripts/check_docs.py` не находит несуществующих локальных ссылок
 - [ ] Матричный CI Windows x64/Linux x64/macOS ARM64 и компиляция Rust 1.95 завершились `SUCCESS`
 - [ ] Выполнен Windows smoke-test по [TESTING.md](TESTING.md), критичные сетевые/OT-дефекты исключены

@@ -9,6 +9,11 @@
 
 ## [Unreleased]
 
+### ENG-01.A — engineering infrastructure
+- Pin development/release Rust 1.100.0; preserve MSRV 1.95.0 and Cargo.lock; use locked Cargo commands.
+- Add cross-platform preflight and regression tests; pin updated Node.js 24 Actions by verified upstream commit SHA.
+- Add engineering and agent rules; plan separate performance, dependency and architecture stages. No scanner behavior changes.
+
 ### Изменено (PR #11 — аудит сопровождения)
 - Удалён устаревший одноразовый workflow публикации v0.3.1; ограничены права release jobs, добавлены проверка тега/версии и полноты SHA-256 manifest.
 - Добавлена проверка относительных ссылок во всех Markdown-документах в CI.

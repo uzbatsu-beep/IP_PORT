@@ -1,0 +1,3 @@
+# Stable formatting policy for the Rust 2024 edition.
+edition = "2024"
+style_edition = "2024"

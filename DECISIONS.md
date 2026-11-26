@@ -23,6 +23,7 @@
 | DEC-013 | 2026-11-26: UI-03.4 утверждён | General / Industrial / Custom; каталог пресетов по производителям, семействам и протоколам, единый Knowledge Service; существующий ScopePreview/InputCache — единственный валидатор; совместимость JSON v1; подготовка Windows v0.5.0. Пресеты не запускают сканирование и не подтверждают идентичность. |
 
 | DEC-014 | 2026-11-26: UI-03.5 утверждён | Свёрнутые по умолчанию группы, виртуализация Devices/Ports, AND-фильтры, расширенные столбцы, единый выбор узла/порта, явная достоверность, нагрузочный тест 100000 результатов, плотность UI-05; аудит целостности каталога. |
+| DEC-015 | 2026-11-26: ENG-01 утверждён | Rust 1.100.0 / MSRV 1.95.0, locked builds, preflight, CI/Performance QA, Cargo Audit/Deny, Dependabot, AGENTS.md, Quality Gate/Rulesets; выделить ResultsStore, ResultsProjection, SelectionState; этапы A–D перед UI-03.6. [ENGINEERING.md](ENGINEERING.md) |
 
 ## Изучить до внедрения
 

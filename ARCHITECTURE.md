@@ -294,3 +294,8 @@ UI-03.4 adds `knowledge_service.rs` as the shared read-only catalog/source facad
 
 
 UI-03.5 extends App's cached result view with ResultFilters, independent host sorting and a lightweight DeviceRow index projection invalidated by view or expansion changes. Both views use virtualized table rows; raw storage and network event stream are unchanged. Host-only selection prevents arbitrary endpoint actions. Knowledge catalog validates internal integrity once at load.
+
+
+## ENG-01 foundation
+
+[ENGINEERING.md](ENGINEERING.md) defines the staged engineering plan. A changes toolchain, validation and documentation only. C will extract ResultsStore, ResultsProjection and typed SelectionState from App while preserving existing raw observations, scope validation, profile v1, export and scan lifecycle. No decomposition is claimed completed by A.

@@ -92,7 +92,7 @@ cargo test --all-targets
 python3 scripts/check_docs.py
 
 # Сборка оптимизированного релизного бинарника
-cargo build --release
+cargo build --locked --release
 ```
 
 Готовый исполняемый файл будет находиться в директории:
@@ -198,3 +198,6 @@ cargo build --release
 - Запускайте Windows EXE сначала на тестовом ПК/изолированной сети; выполните тесты Services database, PTR, ARP/NDP и OUI по [TESTING.md](TESTING.md).
 - При закрытии Windows-приложения откройте `Win+R` → `perfmon /rel` и запишите имя аварийного процесса, модуль и код исключения. `msedgewebview2.exe` может относиться к стороннему приложению — не следует приписывать эту ошибку native egui-сканеру без записи из системного журнала. Подробнее — [OPERATIONS.md](OPERATIONS.md).
 - На macOS запуск неподписанного бинарника может потребовать явного разрешения в **Privacy & Security**. Не рекомендуем отключать Gatekeeper для всей системы; команду `xattr -cr` используйте только после проверки источника и хэша.
+
+
+ENG-01.A: release builds use the exact Rust version in rust-toolchain.toml and `--locked`; see [ENGINEERING.md](ENGINEERING.md). This locks the Rust/dependency inputs, not the entire OS/linker environment.
