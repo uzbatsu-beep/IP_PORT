@@ -227,6 +227,15 @@ pub struct HostInfoStats {
     pub last_neighbor_error: Option<String>,
 }
 
+#[cfg(test)]
+#[derive(Default)]
+struct LiveFrameProbe {
+    events: usize,
+    event_ms: f64,
+    enrichment_ms: f64,
+    projection_ms: f64,
+}
+
 pub struct App {
     pub active_scan_context: Option<ui::toolbar::ScanContext>,
     pub workspace: ui::workspace::Workspace,
@@ -282,6 +291,8 @@ pub struct App {
     last_export_dir: Option<PathBuf>,
     pub last_export_path: Option<PathBuf>,
     pub scroll_to_selected: bool,
+    #[cfg(test)]
+    live_probe: Option<LiveFrameProbe>,
 }
 
 impl App {
@@ -366,6 +377,8 @@ impl App {
             last_export_dir: None,
             last_export_path: None,
             scroll_to_selected: false,
+            #[cfg(test)]
+            live_probe: None,
         }
     }
 
@@ -810,12 +823,24 @@ impl App {
     }
 
     pub fn ensure_results_view(&mut self) {
+        #[cfg(test)]
+        let started = self.live_probe.as_ref().map(|_| Instant::now());
         self.projection.ensure(&self.results, &self.host_info);
+        #[cfg(test)]
+        if let (Some(probe), Some(started)) = (&mut self.live_probe, started) {
+            probe.projection_ms += started.elapsed().as_secs_f64() * 1000.0;
+        }
     }
 
     pub fn ensure_device_rows(&mut self) {
+        #[cfg(test)]
+        let started = self.live_probe.as_ref().map(|_| Instant::now());
         self.projection
             .ensure_device_rows(&self.results, &self.host_info);
+        #[cfg(test)]
+        if let (Some(probe), Some(started)) = (&mut self.live_probe, started) {
+            probe.projection_ms += started.elapsed().as_secs_f64() * 1000.0;
+        }
     }
 
     pub fn device_rows(&self) -> &[DeviceRow] {
@@ -973,7 +998,13 @@ impl App {
             return;
         };
         self.last_export_dir = path.parent().map(PathBuf::from);
+        self.export_to_path(path, extension);
+    }
 
+    fn export_to_path(&mut self, path: PathBuf, extension: &str) {
+        if self.export_task.is_some() {
+            return;
+        }
         let snapshot = self.results.snapshot();
         let host_metadata = self.host_info.clone();
         let snapshot_count = snapshot.len();
@@ -1354,8 +1385,21 @@ impl App {
     pub fn update_ui(&mut self, ui: &mut egui::Ui) {
         self.poll_export_task(ui.ctx());
         self.poll_oui_task(ui.ctx());
+        #[cfg(test)]
+        let started = self.live_probe.as_ref().map(|_| Instant::now());
         let processed = self.drain_events_with_budget(MAX_EVENTS_PER_FRAME);
+        #[cfg(test)]
+        if let (Some(probe), Some(started)) = (&mut self.live_probe, started) {
+            probe.events = processed;
+            probe.event_ms = started.elapsed().as_secs_f64() * 1000.0;
+        }
+        #[cfg(test)]
+        let started = self.live_probe.as_ref().map(|_| Instant::now());
         self.drain_host_enrichment(ui.ctx());
+        #[cfg(test)]
+        if let (Some(probe), Some(started)) = (&mut self.live_probe, started) {
+            probe.enrichment_ms = started.elapsed().as_secs_f64() * 1000.0;
+        }
 
         use ui::commands::{self, AppCommand};
 
@@ -1542,6 +1586,8 @@ impl eframe::App for App {
 
 #[cfg(test)]
 mod tests {
+    mod live_qa;
+
     use super::*;
     use std::net::{IpAddr, Ipv4Addr};
     use tokio::sync::mpsc;

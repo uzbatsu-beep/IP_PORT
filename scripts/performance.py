@@ -45,13 +45,18 @@ def main() -> int:
     path = ROOT / "target" / "performance-report.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.unlink(missing_ok=True)
+    live_path = ROOT / "target" / "live-performance-report.json"
+    live_path.unlink(missing_ok=True)
     command = ["cargo", f"+{pinned_channel()}", "test", "--locked", "--release",
-               "--bin", "ip_port_scanner", PERFORMANCE_TESTS[-1], "--", "--exact",
-               "--test-threads=1", "--nocapture"]
-    env = dict(os.environ, IP_PORT_PERF_REPORT=str(path))
+               "--bin", "ip_port_scanner"]
+    exact = ["--", "--exact", "--test-threads=1", "--nocapture"]
+    env = dict(os.environ, IP_PORT_PERF_REPORT=str(path), IP_PORT_LIVE_REPORT=str(live_path))
     try:
-        subprocess.run(command, cwd=ROOT, env=env, check=True)
+        subprocess.run([*command, PERFORMANCE_TESTS[-2], *exact], cwd=ROOT, env=env, check=True)
         validate(json.loads(path.read_text(encoding="utf-8")))
+        subprocess.run([*command, PERFORMANCE_TESTS[-1], *exact], cwd=ROOT, env=env, check=True)
+        from live_performance import validate_live
+        validate_live(json.loads(live_path.read_text(encoding="utf-8")))
     except (OSError, subprocess.CalledProcessError, ValueError, KeyError, TypeError) as error:
         print(f"Performance QA failed: {error}", file=sys.stderr)
         return 1

@@ -118,6 +118,14 @@ pub struct HostInfoWorker {
 }
 
 impl HostInfoWorker {
+    #[cfg(test)]
+    pub(crate) fn from_test_channels(
+        sender: mpsc::SyncSender<IpAddr>,
+        updates: mpsc::Receiver<HostInfoEvent>,
+    ) -> Self {
+        Self { sender, updates }
+    }
+
     pub fn start(resolve_ptr: bool, neighbor_cache: bool) -> io::Result<Self> {
         let (sender, requests) = mpsc::sync_channel(512);
         let requests = Arc::new(Mutex::new(requests));

@@ -13,6 +13,7 @@ PERFORMANCE_TESTS = (
     "app::tests::stress_benchmark_events_sorting_and_rendering",
     "app::tests::virtualized_device_rows_at_storage_limit",
     "app::tests::performance_matrix_optimized",
+    "app::tests::live_qa::live_performance_matrix_optimized",
 )
 
 

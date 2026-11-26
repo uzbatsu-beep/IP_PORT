@@ -9,6 +9,10 @@
 
 ## [Unreleased]
 
+### ENG-01.C4 — Live Performance QA baseline
+- Add eleven deterministic live integration scenarios, test-only phase timing and queue/selection accounting, validated JSON report and artifact upload.
+- Preserve existing timing gates; live timing is diagnostic until measured. Extract path-based export entry point for actual background export testing.
+
 ### ENG-01.C3 — Typed SelectionState
 - Replace coupled selection fields with None / Host(IpAddr) / Endpoint(EndpointId), generation-checked resolution and explicit command guards.
 - Preserve selection across projection changes and collapse; distinguish host/endpoint outside-filter warnings and use boundary navigation in Ports for host-only selection.

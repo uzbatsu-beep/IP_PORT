@@ -8,3 +8,8 @@ The A baseline (debug headless 20k after isolation): Windows mean 5.106 ms/P95 5
 
 
 C2 adds cumulative `projection_metrics` to each scenario (filter_rebuilds, port_sorts, group_rebuilds, host_sorts, device_row_rebuilds, view_rebuilds). All counters must stay unchanged during measured and warm-up frames of stable scenarios. C1 Windows 100k baseline: Devices mean 0.369 ms / RSS 44.4 MiB, Ports mean 0.433 ms / RSS 43.9 MiB (CI 45864084899); runner variation applies. Live ingestion and metadata stress remain C4.
+
+
+## Live Performance QA (DEC-019)
+
+Run `python scripts/performance.py` for existing steady-state QA and LIVE-01–11. The second optimized test uses real App frame/event drainage and a bounded 4096-event mock channel; 64/256/1024 arrivals, bursts, filters, sorts, injected worker metadata, selection, capacity, cancellation/terminal ordering, clear/rescan, background export and combined load. `target/live-performance-report.json` records raw frame samples, queue before/after, data/terminal accounting, event/enrichment/projection times, isolated endpoint lookup, stage counters, RSS and synthetic stop-to-terminal latency. Queue high water is sampled before frames. Throughput is events divided by measured frame CPU/wall time, excluding producer generation and inter-frame waits, not network throughput. Cancellation measures App drainage with a synthetic terminal, not socket cancellation; existing scanner cancellation tests remain. No GPU rendering or actual DNS/network probing. Timings are diagnostic (16 ms mean / 25 ms P95), functional accounting, bounds and complete report are blocking; previous steady-state gates unchanged. C4.3 optimization requires measured evidence.
