@@ -291,3 +291,6 @@ UI-03.3 centralizes application actions in `ui/commands.rs`. Toolbar and keyboar
 
 
 UI-03.4 adds `knowledge_service.rs` as the shared read-only catalog/source facade; discovery.rs consumes curated catalog record IDs and existing port parsing/formatting helpers. The catalog is not the scanner's service registry or a probe dispatch table. Scope validation remains exclusively in App::refresh_input_preview and InputCache. UI modes are transient; profile v1 remains unchanged.
+
+
+UI-03.5 extends App's cached result view with ResultFilters, independent host sorting and a lightweight DeviceRow index projection invalidated by view or expansion changes. Both views use virtualized table rows; raw storage and network event stream are unchanged. Host-only selection prevents arbitrary endpoint actions. Knowledge catalog validates internal integrity once at load.

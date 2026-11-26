@@ -164,3 +164,6 @@ UI-03.3 adds a global two-level toolbar: start/stop, profiles, export, scan cont
 
 
 Upcoming v0.5.0 (development): Discovery adds General / Industrial / Custom, curated catalog-derived port candidates by manufacturer/family/protocol, source links, and enhanced ScopePreview. JSON profile v1 remains compatible. The published stable release remains v0.4.0 until the v0.5.0 release workflow completes.
+
+
+UI-03.5 (development): virtualized Devices/Ports, explicit service evidence, combined filters and stable selection; industrial catalog expanded to 56 reference entries. Full factory/model coverage is not claimed.

@@ -559,9 +559,9 @@
       "transport": "Ethernet L2",
       "ports": "0x88A4",
       "purpose": "Cyclic fieldbus",
-      "notes": "Not ordinary IP port scan; verify dedicated L2 sources before adapter.",
-      "kind": "research_pending",
-      "source": "https://www.iana.org/assignments/service-names-port-numbers"
+      "notes": "ETG specifies EtherType 0x88A4. Not an IP port or a generic TCP/UDP discovery target.",
+      "kind": "layer2",
+      "source": "https://www.ethercat.org/en/technology.html"
     },
     {
       "id": "ot-052",
@@ -573,6 +573,50 @@
       "notes": "Identify via master/gateway or offline descriptors; not ordinary IP scan.",
       "kind": "research_pending",
       "source": "https://www.iana.org/assignments/service-names-port-numbers"
+    },
+    {
+      "id": "ot-053",
+      "vendor": "Universal Robots",
+      "family": "CB3 / PolyScope 5 (legacy Realtime interface)",
+      "transport": "TCP",
+      "ports": "30003",
+      "purpose": "Realtime client",
+      "notes": "Deprecated; unavailable in PolyScope X. Reference only; no control scripts.",
+      "kind": "conditional",
+      "source": "https://docs.universal-robots.com/tutorials/communication-protocol-tutorials/realtime-guide.html"
+    },
+    {
+      "id": "ot-054",
+      "vendor": "Universal Robots",
+      "family": "UR controller / RTDE",
+      "transport": "TCP",
+      "ports": "30004",
+      "purpose": "RTDE data exchange",
+      "notes": "Controller/configuration dependent; reference only, no RTDE writes or automatic protocol probes.",
+      "kind": "documented_default",
+      "source": "https://docs.universal-robots.com/tutorials/communication-protocol-tutorials/rtde-guide.html"
+    },
+    {
+      "id": "ot-055",
+      "vendor": "Universal Robots",
+      "family": "CB3 / PolyScope 5",
+      "transport": "TCP",
+      "ports": "29999, 30001, 30002",
+      "purpose": "Dashboard / Primary / Secondary interfaces",
+      "notes": "Interface ports documented for URSim CB3/PolyScope 5; exact real controller access depends on configuration; no commands.",
+      "kind": "conditional",
+      "source": "https://docs.universal-robots.com/Universal_Robots_ROS2_Documentation/doc/ur_client_library/doc/setup/ursim_docker.html"
+    },
+    {
+      "id": "ot-056",
+      "vendor": "Inductive Automation",
+      "family": "Ignition 8.1 Gateway",
+      "transport": "TCP",
+      "ports": "8088, 8043, 8060",
+      "purpose": "HTTP / HTTPS / Gateway Network",
+      "notes": "Configurable; gateway may select another available port; not a PLC identity.",
+      "kind": "documented_default",
+      "source": "https://docs.inductiveautomation.com/docs/8.1/getting-started/quick-start-guide/download-and-install"
     }
   ]
 }

@@ -32,6 +32,48 @@ pub enum ResultsViewMode {
     GroupedByHost,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ResultFilters {
+    pub vendor: String,
+    pub service: String,
+    pub transport: Option<ScanProtocol>,
+    pub state: Option<PortState>,
+    pub evidence: Option<bool>,
+}
+impl ResultFilters {
+    fn matches(
+        &self,
+        row: &ResultRow,
+        info: Option<&HostInfo>,
+        vendor: &str,
+        service: &str,
+    ) -> bool {
+        (vendor.is_empty()
+            || info
+                .and_then(|i| i.vendor.as_deref())
+                .is_some_and(|v| contains_ascii_case_insensitive(v, vendor)))
+            && (service.is_empty() || contains_ascii_case_insensitive(&row.raw.service, service))
+            && self.transport.is_none_or(|v| v == row.raw.protocol)
+            && self.state.is_none_or(|v| v == row.raw.state)
+            && self
+                .evidence
+                .is_none_or(|v| v == (row.raw.service_verified && row.raw.state == PortState::Open))
+    }
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HostSort {
+    #[default]
+    Address,
+    Vendor,
+    Endpoints,
+    Rtt,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeviceRow {
+    Host(usize),
+    Endpoint(usize),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct HostGroup {
     pub ip: IpAddr,
@@ -140,6 +182,8 @@ impl ResultRow {
         query_lower.is_empty()
             || contains_ascii_case_insensitive(&self.ip_text, query_lower)
             || self.port_text.contains(query_lower)
+            || contains_ascii_case_insensitive(self.protocol_text, query_lower)
+            || contains_ascii_case_insensitive(self.state_text, query_lower)
             || contains_ascii_case_insensitive(&self.raw.service, query_lower)
             || contains_ascii_case_insensitive(self.protocol_text, query_lower)
             || contains_ascii_case_insensitive(self.state_text, query_lower)
@@ -357,6 +401,11 @@ pub struct App {
     pub status_level: StatusLevel,
     pub results: Vec<ScanResult>,
     pub results_filter: String,
+    pub filters: ResultFilters,
+    pub host_sort: HostSort,
+    pub host_sort_ascending: bool,
+    pub selected_host_only: bool,
+    expanded_hosts: HashSet<IpAddr>,
     pub sort_column: SortColumn,
     pub sort_ascending: bool,
     pub selected_result: Option<usize>,
@@ -374,6 +423,10 @@ pub struct App {
     rows: Vec<ResultRow>,
     visible_indices: Vec<usize>,
     host_groups: Vec<HostGroup>,
+    device_rows: Vec<DeviceRow>,
+    device_rows_dirty: bool,
+    cached_filters: ResultFilters,
+    cached_host_sort: (HostSort, bool),
     cached_rtt_stats: Option<crate::ui::rtt_view::RttStats>,
     rtt_stats_dirty: bool,
     cached_filter: String,
@@ -455,6 +508,11 @@ impl App {
             status_level: StatusLevel::Idle,
             results: Vec::new(),
             results_filter: String::new(),
+            filters: ResultFilters::default(),
+            host_sort: HostSort::Address,
+            host_sort_ascending: true,
+            selected_host_only: false,
+            expanded_hosts: HashSet::new(),
             sort_column: SortColumn::Address,
             sort_ascending: true,
             selected_result: None,
@@ -470,6 +528,10 @@ impl App {
             rows: Vec::new(),
             visible_indices: Vec::new(),
             host_groups: Vec::new(),
+            device_rows: Vec::new(),
+            device_rows_dirty: true,
+            cached_filters: ResultFilters::default(),
+            cached_host_sort: (HostSort::Address, true),
             cached_rtt_stats: None,
             rtt_stats_dirty: true,
             cached_filter: String::new(),
@@ -934,15 +996,19 @@ impl App {
     }
 
     pub fn ensure_results_view(&mut self) {
-        let filter_changed = self.cached_filter != self.results_filter;
+        let filter_changed =
+            self.cached_filter != self.results_filter || self.cached_filters != self.filters;
+        let host_sort_changed = self.cached_host_sort != (self.host_sort, self.host_sort_ascending);
         let sort_changed = self.cached_sort_column != self.sort_column
             || self.cached_sort_ascending != self.sort_ascending;
 
-        if !self.view_dirty && !filter_changed && !sort_changed {
+        if !self.view_dirty && !filter_changed && !sort_changed && !host_sort_changed {
             return;
         }
 
         let query_lower = self.results_filter.trim().to_ascii_lowercase();
+        let vendor_filter = self.filters.vendor.trim().to_ascii_lowercase();
+        let service_filter = self.filters.service.trim().to_ascii_lowercase();
         self.visible_indices.clear();
         for (idx, row) in self.rows.iter().enumerate() {
             let info_matches =
@@ -957,7 +1023,14 @@ impl App {
                             contains_ascii_case_insensitive(value, &query_lower)
                         })
                 });
-            if row.matches_lowercase_query(&query_lower) || info_matches {
+            if (row.matches_lowercase_query(&query_lower) || info_matches)
+                && self.filters.matches(
+                    row,
+                    self.host_info.get(&row.raw.ip),
+                    &vendor_filter,
+                    &service_filter,
+                )
+            {
                 self.visible_indices.push(idx);
             }
         }
@@ -992,6 +1065,8 @@ impl App {
 
         self.cached_filter.clear();
         self.cached_filter.push_str(&self.results_filter);
+        self.cached_filters = self.filters.clone();
+        self.cached_host_sort = (self.host_sort, self.host_sort_ascending);
         self.cached_sort_column = self.sort_column;
         self.cached_sort_ascending = self.sort_ascending;
         self.view_dirty = false;
@@ -1013,6 +1088,97 @@ impl App {
             .into_iter()
             .map(|(ip, indices)| HostGroup::build(ip, indices, &self.rows))
             .collect();
+        let info = &self.host_info;
+        let sort = self.host_sort;
+        let ascending = self.host_sort_ascending;
+        self.host_groups.sort_by(|a, b| {
+            let vendor = |ip: IpAddr| {
+                info.get(&ip)
+                    .and_then(|i| i.vendor.as_deref())
+                    .unwrap_or("")
+            };
+            let order = match sort {
+                HostSort::Address => a.ip.cmp(&b.ip),
+                HostSort::Vendor => vendor(a.ip).cmp(vendor(b.ip)),
+                HostSort::Endpoints => a.ports_count.cmp(&b.ports_count),
+                HostSort::Rtt => {
+                    (!a.has_measured_rtt, a.min_rtt).cmp(&(!b.has_measured_rtt, b.min_rtt))
+                }
+            }
+            .then_with(|| a.ip.cmp(&b.ip));
+            if ascending { order } else { order.reverse() }
+        });
+        self.device_rows_dirty = true;
+    }
+
+    pub fn ensure_device_rows(&mut self) {
+        self.ensure_results_view();
+        if !self.device_rows_dirty {
+            return;
+        }
+        self.device_rows.clear();
+        for (index, group) in self.host_groups.iter().enumerate() {
+            self.device_rows.push(DeviceRow::Host(index));
+            if self.expanded_hosts.contains(&group.ip) {
+                self.device_rows
+                    .extend(group.indices.iter().copied().map(DeviceRow::Endpoint));
+            }
+        }
+        self.device_rows_dirty = false;
+    }
+
+    pub fn device_rows(&self) -> &[DeviceRow] {
+        &self.device_rows
+    }
+
+    pub fn host_expanded(&self, ip: IpAddr) -> bool {
+        self.expanded_hosts.contains(&ip)
+    }
+
+    pub fn toggle_host(&mut self, ip: IpAddr) {
+        if !self.expanded_hosts.remove(&ip) {
+            self.expanded_hosts.insert(ip);
+        }
+        self.device_rows_dirty = true;
+    }
+
+    pub fn collapse_hosts(&mut self) {
+        self.expanded_hosts.clear();
+        self.device_rows_dirty = true;
+    }
+
+    pub fn select_endpoint(&mut self, index: usize) {
+        self.selected_result = Some(index);
+        self.selected_host_only = false;
+    }
+
+    pub fn select_host(&mut self, group_index: usize) {
+        let group = &self.host_groups[group_index];
+        if !self
+            .selected_result
+            .is_some_and(|idx| self.rows.get(idx).is_some_and(|r| r.raw.ip == group.ip))
+        {
+            self.selected_result = group.indices.first().copied();
+        }
+        self.selected_host_only = true;
+    }
+
+    pub fn selected_device_position(&self) -> Option<usize> {
+        let index = self.selected_result?;
+        let ip = self.rows.get(index)?.raw.ip;
+        if !self.selected_host_only
+            && self.host_expanded(ip)
+            && let Some(pos) = self
+                .device_rows
+                .iter()
+                .position(|row| *row == DeviceRow::Endpoint(index))
+        {
+            return Some(pos);
+        }
+        self.device_rows.iter().position(|row| match row {
+            DeviceRow::Host(group) => self.host_groups[*group].ip == ip,
+            DeviceRow::Endpoint(_) => false,
+        })
     }
 
     /// Cache latency distribution until scan results change, not once per UI frame.
@@ -1282,6 +1448,10 @@ impl App {
         self.rows.clear();
         self.visible_indices.clear();
         self.host_groups.clear();
+        self.device_rows.clear();
+        self.expanded_hosts.clear();
+        self.device_rows_dirty = true;
+        self.selected_host_only = false;
         self.host_info.clear();
         self.host_info_pending.clear();
         self.host_info_backlog.clear();
@@ -1552,7 +1722,11 @@ impl App {
             && let Some(index) = self.selected_result
             && let Some(result) = self.results.get(index)
         {
-            let text = format!("{}:{}", result.ip, result.port);
+            let text = if self.selected_host_only {
+                result.ip.to_string()
+            } else {
+                format!("{}:{}", result.ip, result.port)
+            };
             self.copy_text_with_toast(ui.ctx(), text.clone(), format!("Copied {text}"));
         }
         if copy_requested && self.selected_result.is_none() && !self.results.is_empty() {
@@ -1582,45 +1756,69 @@ impl App {
             results_active && !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::End));
 
         self.ensure_results_view();
-        if arrow_down && !self.visible_indices.is_empty() {
-            let next_index = match self.selected_result {
-                None => self.visible_indices[0],
-                Some(current) => {
-                    let pos = self
-                        .visible_indices
-                        .iter()
-                        .position(|&idx| idx == current)
-                        .unwrap_or(0);
-                    let next_pos = (pos + 1).min(self.visible_indices.len() - 1);
-                    self.visible_indices[next_pos]
+        if self.view_mode == ResultsViewMode::GroupedByHost
+            && (arrow_down || arrow_up || home_pressed || end_pressed)
+        {
+            self.ensure_device_rows();
+            let len = self.device_rows.len();
+            if len > 0 {
+                let pos = self.selected_device_position();
+                let next = if home_pressed {
+                    0
+                } else if end_pressed {
+                    len - 1
+                } else if arrow_down {
+                    pos.map_or(0, |p| (p + 1).min(len - 1))
+                } else {
+                    pos.map_or(len - 1, |p| p.saturating_sub(1))
+                };
+                match self.device_rows[next] {
+                    DeviceRow::Host(group) => self.select_host(group),
+                    DeviceRow::Endpoint(index) => self.select_endpoint(index),
                 }
-            };
-            self.selected_result = Some(next_index);
-            self.scroll_to_selected = true;
-        }
-        if arrow_up && !self.visible_indices.is_empty() {
-            let prev_index = match self.selected_result {
-                None => *self.visible_indices.last().unwrap(),
-                Some(current) => {
-                    let pos = self
-                        .visible_indices
-                        .iter()
-                        .position(|&idx| idx == current)
-                        .unwrap_or(0);
-                    let prev_pos = pos.saturating_sub(1);
-                    self.visible_indices[prev_pos]
-                }
-            };
-            self.selected_result = Some(prev_index);
-            self.scroll_to_selected = true;
-        }
-        if home_pressed && !self.visible_indices.is_empty() {
-            self.selected_result = Some(self.visible_indices[0]);
-            self.scroll_to_selected = true;
-        }
-        if end_pressed && !self.visible_indices.is_empty() {
-            self.selected_result = self.visible_indices.last().copied();
-            self.scroll_to_selected = true;
+                self.scroll_to_selected = true;
+            }
+        } else {
+            if arrow_down && !self.visible_indices.is_empty() {
+                let next_index = match self.selected_result {
+                    None => self.visible_indices[0],
+                    Some(current) => {
+                        let pos = self
+                            .visible_indices
+                            .iter()
+                            .position(|&idx| idx == current)
+                            .unwrap_or(0);
+                        let next_pos = (pos + 1).min(self.visible_indices.len() - 1);
+                        self.visible_indices[next_pos]
+                    }
+                };
+                self.select_endpoint(next_index);
+                self.scroll_to_selected = true;
+            }
+            if arrow_up && !self.visible_indices.is_empty() {
+                let prev_index = match self.selected_result {
+                    None => *self.visible_indices.last().unwrap(),
+                    Some(current) => {
+                        let pos = self
+                            .visible_indices
+                            .iter()
+                            .position(|&idx| idx == current)
+                            .unwrap_or(0);
+                        let prev_pos = pos.saturating_sub(1);
+                        self.visible_indices[prev_pos]
+                    }
+                };
+                self.select_endpoint(prev_index);
+                self.scroll_to_selected = true;
+            }
+            if home_pressed && !self.visible_indices.is_empty() {
+                self.select_endpoint(self.visible_indices[0]);
+                self.scroll_to_selected = true;
+            }
+            if end_pressed && !self.visible_indices.is_empty() {
+                self.select_endpoint(*self.visible_indices.last().unwrap());
+                self.scroll_to_selected = true;
+            }
         }
 
         let row_action_requested = results_active
@@ -1628,6 +1826,7 @@ impl App {
             && !command
             && ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space));
         if row_action_requested
+            && !self.selected_host_only
             && let Some(index) = self.selected_result
             && let Some(result) = self.results.get(index)
         {
@@ -2797,6 +2996,86 @@ mod tests {
             ratio_error >= 4.5,
             "Error contrast on panel: {ratio_error:.2} (requires >= 4.5 for WCAG AA)"
         );
+    }
+
+    #[test]
+    fn virtualized_device_rows_at_storage_limit() {
+        let mut app = App::default_state();
+        app.workspace.section = ui::navigation::Section::Devices;
+        app.view_mode = ResultsViewMode::GroupedByHost;
+        let started = Instant::now();
+        for i in 0..MAX_STORED_RESULTS {
+            let ip = IpAddr::V4(Ipv4Addr::from(0x0a00_0001 + (i / 10) as u32));
+            app.push_result(ScanResult::new(
+                ip,
+                (i % 10 + 80) as u16,
+                "http",
+                Duration::from_millis(2),
+            ));
+        }
+        app.ensure_device_rows();
+        assert_eq!(app.device_rows().len(), 10_000);
+        let first = app.host_groups()[0].ip;
+        app.toggle_host(first);
+        app.ensure_device_rows();
+        assert_eq!(app.device_rows().len(), 10_010);
+        app.select_endpoint(3);
+        let rebuilds = app.view_rebuilds();
+        let ctx = egui::Context::default();
+        crate::ui::theme::apply(&ctx);
+        let mut elapsed = Vec::new();
+        for _ in 0..12 {
+            let now = Instant::now();
+            let output = run_headless_frame(&mut app, &ctx, egui::vec2(1180.0, 760.0), 1.0, vec![]);
+            assert!(
+                output.shapes.len() < 5000,
+                "Virtualized draw must stay bounded"
+            );
+            elapsed.push(now.elapsed());
+        }
+        assert_eq!(app.view_rebuilds(), rebuilds);
+        assert_eq!(app.selected_result, Some(3));
+        app.filters.transport = Some(ScanProtocol::Udp);
+        app.ensure_device_rows();
+        assert!(app.device_rows().is_empty());
+        assert_eq!(app.results.len(), MAX_STORED_RESULTS);
+        app.filters = ResultFilters::default();
+        app.ensure_device_rows();
+        assert_eq!(app.device_rows().len(), 10_010);
+        assert_eq!(app.selected_result, Some(3));
+        app.select_host(0);
+        assert!(app.selected_host_only);
+        app.select_endpoint(3);
+        assert!(!app.selected_host_only);
+        println!(
+            "100k endpoints / 10k hosts: total {:?}; frame samples {:?}",
+            started.elapsed(),
+            elapsed
+        );
+    }
+
+    #[test]
+    fn combined_filters_are_and_and_preserve_raw_results() {
+        let mut app = App::default_state();
+        app.push_result(sample_result(1, 80, "http", 10));
+        app.push_result(ScanResult::udp(
+            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+            80,
+            PortState::OpenFiltered,
+            "http",
+            Duration::ZERO,
+            false,
+        ));
+        app.filters.service = "HTTP".to_owned();
+        app.filters.transport = Some(ScanProtocol::Udp);
+        app.filters.state = Some(PortState::OpenFiltered);
+        app.filters.evidence = Some(false);
+        app.ensure_device_rows();
+        assert_eq!(app.visible_indices(), &[1]);
+        app.filters.evidence = Some(true);
+        app.ensure_device_rows();
+        assert!(app.visible_indices().is_empty());
+        assert_eq!(app.results.len(), 2);
     }
 
     #[test]

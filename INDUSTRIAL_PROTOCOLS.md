@@ -68,8 +68,13 @@ For TCP, connect success indicates an accepting endpoint, not application identi
 | Standards / infrastructure / IEC 60870-5-104 | TCP | 2404 | Telecontrol | [registered_candidate](https://www.iana.org/assignments/service-names-port-numbers) |
 | Standards / infrastructure / DNP3 | TCP/UDP | 20000 | Telecontrol | [registered_candidate](https://www.iana.org/assignments/service-names-port-numbers) |
 | Standards / infrastructure / MQTT | TCP | 1883, 8883 | Broker / TLS | [registered_candidate](https://www.iana.org/assignments/service-names-port-numbers) |
-| Standards / infrastructure / EtherCAT | Ethernet L2 | 0x88A4 | Cyclic fieldbus | [research_pending](https://www.iana.org/assignments/service-names-port-numbers) |
+| Standards / infrastructure / EtherCAT | Ethernet L2 | 0x88A4 | Cyclic fieldbus | [layer2](https://www.ethercat.org/en/technology.html) |
 | Standards / infrastructure / PROFIBUS / CANopen / IO-Link / Modbus RTU | Non-IP | — | Fieldbus / serial | [research_pending](https://www.iana.org/assignments/service-names-port-numbers) |
+
+| Universal Robots / CB3 / PolyScope 5 (legacy Realtime interface) | TCP | 30003 | Realtime client | [conditional](https://docs.universal-robots.com/tutorials/communication-protocol-tutorials/realtime-guide.html) |
+| Universal Robots / UR controller / RTDE | TCP | 30004 | RTDE data exchange | [documented_default](https://docs.universal-robots.com/tutorials/communication-protocol-tutorials/rtde-guide.html) |
+| Universal Robots / CB3 / PolyScope 5 | TCP | 29999, 30001, 30002 | Dashboard / Primary / Secondary interfaces | [conditional](https://docs.universal-robots.com/Universal_Robots_ROS2_Documentation/doc/ur_client_library/doc/setup/ursim_docker.html) |
+| Inductive Automation / Ignition 8.1 Gateway | TCP | 8088, 8043, 8060 | HTTP / HTTPS / Gateway Network | [documented_default](https://docs.inductiveautomation.com/docs/8.1/getting-started/quick-start-guide/download-and-install) |
 
 ## Research backlog
 
@@ -84,3 +89,8 @@ For TCP, connect success indicates an accepting endpoint, not application identi
 ## UI-03.4 candidate presets
 
 Discovery uses a reviewed record-ID allowlist in `src/knowledge_service.rs` instead of blindly converting every catalog row to a port list. Candidate ports are derived from the existing numeric fields using the existing parser, sorted/deduplicated and separated by transport. Vendor/family filtering is exact against catalog labels; combined family labels remain combined. Protocol group membership is explicit. No automatic scanning, identification or port replacement. Conditional entries, unknown/configurable ports, L2, cyclic I/O, trap receivers, and ambiguous directions are excluded. UDP entries are only configuration candidates, not proof that the current generic UDP probe can identify the protocol. Catalog remains 52 records; no new primary-source review is claimed in UI-03.4.
+
+
+## UI-03.5 integrity and coverage audit
+
+56 records; 52 existing IDs preserved, EtherCAT source corrected to ETG, four new reference-only records (Universal Robots and Ignition). The explicit 26-record candidate allowlist is unchanged. Runtime validation rejects duplicate IDs, empty required fields, non-HTTPS sources, unknown kinds, missing or invalid candidate references and invalid protocol group membership. It does not verify live links or factory settings. Remaining coverage gaps: ABB, KUKA, Kawasaki, FANUC, Delta, Inovance, WAGO, B&R, Phoenix Contact, Keyence, LS Electric, VIPA and older Siemens/Omron/OWEN generations, Hyundai and NX100; model-specific primary sources and bench observations still needed. Catalog coverage is not exhaustive and never implies device identity.
