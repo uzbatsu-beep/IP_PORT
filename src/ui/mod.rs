@@ -1,4 +1,9 @@
 pub mod components;
+pub mod icons;
+pub mod knowledge;
+pub mod navigation;
+pub mod preferences;
+pub mod views;
 pub mod quick_actions;
 pub mod results;
 pub mod rtt_view;

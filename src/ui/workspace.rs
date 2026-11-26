@@ -2,36 +2,41 @@
 use egui::{RichText, Ui};
 
 use crate::app::{App, ResultsViewMode, StatusLevel};
-use crate::ui::{components, results, sidebar};
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Language {
-    #[default]
-    English,
-    Russian,
-}
-
-impl Language {
-    pub fn text(self, english: &'static str, russian: &'static str) -> &'static str {
-        match self {
-            Self::English => english,
-            Self::Russian => russian,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum Section {
-    #[default]
-    Discovery,
-    Devices,
-    Settings,
-}
+use crate::ui::navigation::Section;
+use crate::ui::{components, navigation, preferences, results, sidebar, views};
+pub use crate::ui::preferences::Language;
 
 #[derive(Default)]
 pub struct Workspace {
-    section: Section,
+    pub section: Section,
     pub language: Language,
+    pub expanded: bool,
+    pub knowledge_query: String,
+    preference_path: Option<std::path::PathBuf>,
+    pub preference_error: Option<String>,
+}
+
+impl Workspace {
+    pub fn restore_preferences(&mut self) {
+        self.preference_path = preferences::path();
+        if let Some(path) = &self.preference_path {
+            match preferences::load(path) {
+                Ok(language) => self.language = language,
+                Err(error) => self.preference_error = Some(error.to_string()),
+            }
+        } else {
+            self.preference_error = Some("Settings directory unavailable".to_owned());
+        }
+    }
+
+    pub fn save_language(&mut self) {
+        self.preference_error = match &self.preference_path {
+            Some(path) => preferences::save(path, self.language)
+                .err()
+                .map(|error| error.to_string()),
+            None => Some("Settings directory unavailable".to_owned()),
+        };
+    }
 }
 
 pub fn initial_view() -> ResultsViewMode {
@@ -45,13 +50,10 @@ fn wide_layout(width: f32) -> bool {
 
 fn select_section(app: &mut App, section: Section) {
     app.workspace.section = section;
-    if section == Section::Devices {
-        app.view_mode = initial_view();
-    }
 }
 
 pub fn show(app: &mut App, ui: &mut Ui) {
-    let wide = wide_layout(ui.available_width());
+    let wide = wide_layout(ui.available_width() - if app.workspace.expanded { 132.0 } else { 0.0 });
     let language = app.workspace.language;
 
     egui::Panel::top("workspace_header")
@@ -68,6 +70,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 });
             });
         });
+
+    if app.workspace.language != language {
+        app.workspace.save_language();
+        ui.ctx().request_repaint();
+    }
 
     egui::Panel::bottom("workspace_status")
         .resizable(false)
@@ -100,44 +107,30 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             });
         });
 
-    egui::Panel::left("workspace_navigation")
-        .resizable(false)
-        .default_size(44.0)
-        .size_range(44.0..=44.0)
-        .show(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                for (section, icon, name) in [
-                    (
-                        Section::Discovery,
-                        "⌕",
-                        language.text("Discovery", "Обнаружение"),
-                    ),
-                    (
-                        Section::Devices,
-                        "▦",
-                        language.text("Devices", "Устройства"),
-                    ),
-                    (
-                        Section::Settings,
-                        "⚙",
-                        language.text("Settings", "Настройки"),
-                    ),
-                ] {
-                    if ui
-                        .selectable_label(
-                            app.workspace.section == section,
-                            RichText::new(icon).size(23.0),
-                        )
-                        .on_hover_text(name)
-                        .clicked()
-                    {
-                        select_section(app, section);
-                    }
-                }
-            });
-        });
+    if let Some(section) = navigation::show(app, ui) {
+        select_section(app, section);
+    }
 
-    if app.workspace.section != Section::Devices {
+    if app.workspace.section != Section::Discovery && app.is_running() {
+        egui::Panel::top("workspace_running")
+            .resizable(false)
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(app.progress_text());
+                    let stopping = app.is_stopping();
+                    let stop = components::danger_button(
+                        ui,
+                        language.text("Stop scan", "Остановить"),
+                        !stopping,
+                    );
+                    if ui.add_enabled(!stopping, stop).clicked() {
+                        app.stop_scan();
+                    }
+                });
+            });
+    }
+
+    if app.workspace.section == Section::Discovery {
         let max_width = if wide { 340.0 } else { 460.0 };
         egui::Panel::left("controls")
             .resizable(true)
@@ -145,25 +138,12 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             .size_range(280.0..=max_width)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    if app.workspace.section == Section::Settings {
-                        components::section_heading(ui, language.text("Settings", "Настройки"));
-                        sidebar::show_appearance(app, ui);
-                        ui.label(
-                            RichText::new(language.text(
-                                "RU/EN currently applies to the workspace shell.",
-                                "RU/EN пока применяется только к оболочке.",
-                            ))
-                            .small()
-                            .weak(),
-                        );
-                    } else {
-                        sidebar::show(app, ui);
-                    }
+                    sidebar::show(app, ui);
                 });
             });
     }
 
-    if wide {
+    if wide && app.workspace.section.has_results() {
         egui::Panel::right("workspace_inspector")
             .resizable(false)
             .default_size(240.0)
@@ -176,12 +156,15 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     }
 
     egui::CentralPanel::default().show(ui, |ui| {
-        if !wide && app.selected_result.is_some() {
+        if app.workspace.section.has_results() && !wide && app.selected_result.is_some() {
             egui::CollapsingHeader::new(language.text("Device inspector", "Карточка устройства"))
                 .default_open(false)
                 .show(ui, |ui| inspector(app, ui, language));
         }
-        results::show(app, ui);
+        match app.workspace.section {
+            Section::Discovery | Section::Devices => results::show(app, ui),
+            section => views::show(section, app, ui),
+        }
     });
 }
 
@@ -275,7 +258,7 @@ mod tests {
         app.selected_result = Some(0);
         app.view_mode = ResultsViewMode::Flat;
         select_section(&mut app, Section::Devices);
-        assert_eq!(app.view_mode, ResultsViewMode::GroupedByHost);
+        assert_eq!(app.view_mode, ResultsViewMode::Flat);
         select_section(&mut app, Section::Settings);
         select_section(&mut app, Section::Discovery);
         assert_eq!(app.targets_input, targets);
@@ -297,7 +280,7 @@ mod tests {
         assert!(wide_layout(1180.0));
         for language in [Language::English, Language::Russian] {
             app.workspace.language = language;
-            for section in [Section::Discovery, Section::Devices, Section::Settings] {
+            for section in Section::ALL {
                 select_section(&mut app, section);
                 for width in [880.0, 1180.0, 1920.0] {
                     let ctx = egui::Context::default();

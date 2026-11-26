@@ -394,6 +394,7 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut app = Self::default_state();
         app.view_mode = ui::workspace::initial_view();
+        app.workspace.restore_preferences();
         app.appearance_path = ui::theme::settings_path();
         if let Some(path) = &app.appearance_path {
             match ui::theme::load(path) {
@@ -1506,9 +1507,10 @@ impl App {
         let is_cmd = |m: &egui::Modifiers| m.command || m.ctrl || m.mac_cmd;
         let command = ui.input(|i| is_cmd(&i.modifiers));
         let text_input_focused = ui.ctx().egui_wants_keyboard_input();
+        let results_active = self.workspace.section.has_results();
         let start_requested = ui.input(|i| is_cmd(&i.modifiers) && i.key_pressed(egui::Key::Enter));
         let stop_requested = !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::Escape));
-        let copy_requested = !text_input_focused
+        let copy_requested = results_active && !text_input_focused
             && ui.input(|i| is_cmd(&i.modifiers) && i.key_pressed(egui::Key::C));
         let export_csv_requested = !text_input_focused
             && ui.input(|i| {
@@ -1553,10 +1555,10 @@ impl App {
             );
         }
 
-        let arrow_down = !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
-        let arrow_up = !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
-        let home_pressed = !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::Home));
-        let end_pressed = !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::End));
+        let arrow_down = results_active && !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
+        let arrow_up = results_active && !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
+        let home_pressed = results_active && !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::Home));
+        let end_pressed = results_active && !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::End));
 
         self.ensure_results_view();
         if arrow_down && !self.visible_indices.is_empty() {
@@ -1600,7 +1602,7 @@ impl App {
             self.scroll_to_selected = true;
         }
 
-        let row_action_requested = !text_input_focused
+        let row_action_requested = results_active && !text_input_focused
             && !command
             && ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space));
         if row_action_requested
@@ -1621,7 +1623,8 @@ impl App {
             }
         }
 
-        if command
+        if results_active
+            && command
             && !ui.ctx().egui_wants_keyboard_input()
             && ui.input(|i| i.key_pressed(egui::Key::F))
         {
@@ -1675,6 +1678,29 @@ mod tests {
         let (_terminal_tx, terminal_rx) = std::sync::mpsc::channel();
         let cancel = CancellationToken::new();
         Ok(ScanHandle::from_channels(rx, terminal_rx, cancel))
+    }
+
+    #[test]
+    fn navigation_keeps_active_scan_and_event_stream() {
+        use crate::ui::navigation::Section;
+
+        let mut app = App::default_state();
+        let (tx, _terminal_tx, cancel) = attach_mock_scan(&mut app);
+        app.push_result(sample_result(1, 80, "http", 1));
+        app.selected_result = Some(0);
+        app.results_filter = "http".to_owned();
+        let targets = app.targets_input.clone();
+        for section in Section::ALL {
+            app.workspace.section = section;
+            assert!(app.is_running());
+            assert!(!cancel.is_cancelled());
+            assert_eq!(app.selected_result, Some(0));
+            assert_eq!(app.results_filter, "http");
+            assert_eq!(app.targets_input, targets);
+            assert!(!tx.is_closed());
+        }
+        app.workspace.section = Section::Discovery;
+        assert_eq!(app.results.len(), 1);
     }
 
     #[test]

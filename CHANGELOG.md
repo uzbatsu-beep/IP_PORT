@@ -213,3 +213,10 @@
 - Engineering Workspace shell with header, navigation rail, context panel, central results, observed-host inspector and status strip.
 - Devices (existing IP grouping) on native startup; Ports remains available. Shell-only RU/EN selector.
 - Navigation and responsive shell tests; no scanner, protocol, export or persistent Asset Store changes.
+
+
+### UI-03.2 (unreleased)
+
+- Typed navigation, original vector icons, compact/expanded rail and persistent RU/EN shell preference.
+- Diagnostics, Knowledge Base and Reports use existing application services; scan lifecycle remains global.
+- Offline source-backed industrial protocol catalog (52 entries), no new active scanning behavior.

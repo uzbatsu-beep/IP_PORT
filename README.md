@@ -155,3 +155,6 @@ The scanner uses reusable theme-aware controls, semantic status text, metrics, p
 ## Engineering Workspace (UI-03.1)
 
 The startup view groups observations by IP (Devices); Ports retains the existing flat table. Use the left icon rail for Discovery, Devices or Settings (appearance). Wide windows show a right inspector for a selected endpoint; narrow windows expose the same details in a collapsible region. The RU/EN selector translates the new shell, not all existing controls yet. See [UI_WORKSPACE.md](UI_WORKSPACE.md).
+
+
+UI-03.2 adds six functional routes and collapsible vector navigation, persistent shell language, and an offline [industrial protocol reference](INDUSTRIAL_PROTOCOLS.md). No new active discovery adapters are enabled.
