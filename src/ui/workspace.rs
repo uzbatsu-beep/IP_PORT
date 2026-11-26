@@ -3,8 +3,8 @@ use egui::{RichText, Ui};
 
 use crate::app::{App, ResultsViewMode, StatusLevel};
 use crate::ui::navigation::Section;
-use crate::ui::{components, navigation, preferences, results, sidebar, views};
 pub use crate::ui::preferences::Language;
+use crate::ui::{components, navigation, preferences, results, sidebar, views};
 
 #[derive(Default)]
 pub struct Workspace {

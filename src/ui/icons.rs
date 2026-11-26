@@ -13,7 +13,12 @@ pub enum Icon {
 }
 
 pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
-    let p = |x: f32, y: f32| Pos2::new(rect.left() + x * rect.width(), rect.top() + y * rect.height());
+    let p = |x: f32, y: f32| {
+        Pos2::new(
+            rect.left() + x * rect.width(),
+            rect.top() + y * rect.height(),
+        )
+    };
     let stroke = Stroke::new(1.5, color);
     let line = |a: (f32, f32), b: (f32, f32)| {
         painter.line_segment([p(a.0, a.1), p(b.0, b.1)], stroke);
@@ -69,7 +74,10 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             for i in 0..8 {
                 let angle = i as f32 * std::f32::consts::FRAC_PI_4;
                 let (sin, cos) = angle.sin_cos();
-                line((0.5 + cos * 0.3, 0.5 + sin * 0.3), (0.5 + cos * 0.44, 0.5 + sin * 0.44));
+                line(
+                    (0.5 + cos * 0.3, 0.5 + sin * 0.3),
+                    (0.5 + cos * 0.44, 0.5 + sin * 0.44),
+                );
             }
         }
         Icon::Menu => {

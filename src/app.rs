@@ -1510,7 +1510,8 @@ impl App {
         let results_active = self.workspace.section.has_results();
         let start_requested = ui.input(|i| is_cmd(&i.modifiers) && i.key_pressed(egui::Key::Enter));
         let stop_requested = !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::Escape));
-        let copy_requested = results_active && !text_input_focused
+        let copy_requested = results_active
+            && !text_input_focused
             && ui.input(|i| is_cmd(&i.modifiers) && i.key_pressed(egui::Key::C));
         let export_csv_requested = !text_input_focused
             && ui.input(|i| {
@@ -1555,10 +1556,16 @@ impl App {
             );
         }
 
-        let arrow_down = results_active && !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
-        let arrow_up = results_active && !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
-        let home_pressed = results_active && !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::Home));
-        let end_pressed = results_active && !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::End));
+        let arrow_down = results_active
+            && !text_input_focused
+            && ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
+        let arrow_up = results_active
+            && !text_input_focused
+            && ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
+        let home_pressed =
+            results_active && !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::Home));
+        let end_pressed =
+            results_active && !text_input_focused && ui.input(|i| i.key_pressed(egui::Key::End));
 
         self.ensure_results_view();
         if arrow_down && !self.visible_indices.is_empty() {
@@ -1602,7 +1609,8 @@ impl App {
             self.scroll_to_selected = true;
         }
 
-        let row_action_requested = results_active && !text_input_focused
+        let row_action_requested = results_active
+            && !text_input_focused
             && !command
             && ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space));
         if row_action_requested
@@ -1701,8 +1709,7 @@ mod tests {
                 1,
             )))
             .unwrap();
-            let output =
-                run_headless_frame(&mut app, &ctx, egui::vec2(1180.0, 760.0), 1.0, vec![]);
+            let output = run_headless_frame(&mut app, &ctx, egui::vec2(1180.0, 760.0), 1.0, vec![]);
             assert!(!output.shapes.is_empty());
             assert!(app.is_running());
             assert!(!cancel.is_cancelled());

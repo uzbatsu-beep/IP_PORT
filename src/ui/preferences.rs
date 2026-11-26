@@ -40,26 +40,40 @@ pub fn load(path: &Path) -> io::Result<Language> {
     let mut bytes = Vec::new();
     file.take(4097).read_to_end(&mut bytes)?;
     if bytes.len() > 4096 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Language file too large"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Language file too large",
+        ));
     }
     let settings: Settings = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
     if settings.schema_version != 1 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Unsupported language schema"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Unsupported language schema",
+        ));
     }
     Ok(settings.language)
 }
 
 pub fn save(path: &Path, language: Language) -> io::Result<()> {
-    let dir = path.parent().ok_or_else(|| io::Error::other("Missing settings directory"))?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| io::Error::other("Missing settings directory"))?;
     fs::create_dir_all(dir)?;
-    let bytes = serde_json::to_vec_pretty(&Settings { schema_version: 1, language })
-        .map_err(io::Error::other)?;
+    let bytes = serde_json::to_vec_pretty(&Settings {
+        schema_version: 1,
+        language,
+    })
+    .map_err(io::Error::other)?;
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(io::Error::other)?
         .as_nanos();
     let pending = dir.join(format!(".language-{}-{nonce}.tmp", std::process::id()));
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&pending)?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&pending)?;
     let result = file.write_all(&bytes).and_then(|_| file.sync_all());
     drop(file);
     let result = result.and_then(|_| fs::rename(&pending, path));
@@ -78,7 +92,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!(
             "ip_port_language_{}_{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         let path = dir.join("language.json");
         assert_eq!(load(&path).unwrap(), Language::English);

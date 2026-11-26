@@ -1,8 +1,8 @@
 //! Routes reuse existing application services rather than owning scanner state.
 use egui::{RichText, Ui};
 
-use crate::app::App;
 use super::{components, knowledge, navigation::Section, rtt_view, sidebar};
+use crate::app::App;
 
 pub fn show(section: Section, app: &mut App, ui: &mut Ui) {
     let language = app.workspace.language;
@@ -16,26 +16,40 @@ pub fn show(section: Section, app: &mut App, ui: &mut Ui) {
                 } else {
                     ui.label(language.text("No measured RTT", "Нет измерений RTT"));
                 }
-                ui.label(format!("PTR: {} / {}", app.host_info_stats.ptr_resolved, app.host_info_stats.completed));
+                ui.label(format!(
+                    "PTR: {} / {}",
+                    app.host_info_stats.ptr_resolved, app.host_info_stats.completed
+                ));
                 ui.label(format!("MAC: {}", app.host_info_stats.mac_found));
                 if let Some(error) = &app.host_info_stats.last_ptr_error {
                     ui.label(RichText::new(error).color(super::theme::warning(ui)));
                 }
             }
             Section::Knowledge => {
-                egui::CollapsingHeader::new("IEEE OUI").default_open(true).show(ui, |ui| {
-                    ui.add_enabled_ui(!app.is_running(), |ui| sidebar::show_oui(app, ui));
-                });
+                egui::CollapsingHeader::new("IEEE OUI")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.add_enabled_ui(!app.is_running(), |ui| sidebar::show_oui(app, ui));
+                    });
                 ui.separator();
                 knowledge::show(&mut app.workspace.knowledge_query, language, ui);
             }
             Section::Reports => {
-                ui.label(language.text("Export all stored results (not the filter).", "Экспорт всех сохранённых результатов без учёта фильтра."));
+                ui.label(language.text(
+                    "Export all stored results (not the filter).",
+                    "Экспорт всех сохранённых результатов без учёта фильтра.",
+                ));
                 let enabled = !app.results.is_empty() && !app.is_exporting();
                 ui.add_enabled_ui(enabled, |ui| {
-                    if ui.button("CSV").clicked() { app.export_csv(); }
-                    if ui.button("JSON").clicked() { app.export_json(); }
-                    if ui.button("HTML").clicked() { app.export_html(); }
+                    if ui.button("CSV").clicked() {
+                        app.export_csv();
+                    }
+                    if ui.button("JSON").clicked() {
+                        app.export_json();
+                    }
+                    if ui.button("HTML").clicked() {
+                        app.export_html();
+                    }
                 });
                 if app.is_exporting() {
                     ui.spinner();
@@ -51,19 +65,33 @@ pub fn show(section: Section, app: &mut App, ui: &mut Ui) {
                 ui.label(language.text("Shell language", "Язык оболочки"));
                 let previous = app.workspace.language;
                 ui.horizontal(|ui| {
-                    ui.selectable_value(&mut app.workspace.language, super::preferences::Language::English, "EN");
-                    ui.selectable_value(&mut app.workspace.language, super::preferences::Language::Russian, "RU");
+                    ui.selectable_value(
+                        &mut app.workspace.language,
+                        super::preferences::Language::English,
+                        "EN",
+                    );
+                    ui.selectable_value(
+                        &mut app.workspace.language,
+                        super::preferences::Language::Russian,
+                        "RU",
+                    );
                 });
                 if previous != app.workspace.language {
                     app.workspace.save_language();
                 }
                 if let Some(error) = &app.workspace.preference_error {
                     ui.label(RichText::new(error).color(super::theme::error(ui)));
-                    if ui.button(language.text("Retry save", "Повторить сохранение")).clicked() {
+                    if ui
+                        .button(language.text("Retry save", "Повторить сохранение"))
+                        .clicked()
+                    {
                         app.workspace.save_language();
                     }
                 }
-                ui.label(language.text("Existing scanner messages are not fully translated yet.", "Сообщения сканера пока переведены не полностью."));
+                ui.label(language.text(
+                    "Existing scanner messages are not fully translated yet.",
+                    "Сообщения сканера пока переведены не полностью.",
+                ));
             }
             Section::Discovery | Section::Devices => {}
         }

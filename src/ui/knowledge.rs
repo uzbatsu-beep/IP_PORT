@@ -1,8 +1,8 @@
 //! Read-only offline reference. Never dispatch probes from catalog entries.
+use super::preferences::Language;
+use egui::Ui;
 use serde::Deserialize;
 use std::sync::OnceLock;
-use egui::Ui;
-use super::preferences::Language;
 
 #[derive(Deserialize)]
 struct Catalog {
@@ -27,8 +27,9 @@ struct Entry {
 fn catalog() -> &'static Result<Catalog, String> {
     static DATA: OnceLock<Result<Catalog, String>> = OnceLock::new();
     DATA.get_or_init(|| {
-        let data: Catalog = serde_json::from_str(include_str!("../../data/industrial_protocols.json"))
-            .map_err(|error| error.to_string())?;
+        let data: Catalog =
+            serde_json::from_str(include_str!("../../data/industrial_protocols.json"))
+                .map_err(|error| error.to_string())?;
         if data.schema_version != 1 {
             return Err("Unsupported catalog schema".to_owned());
         }
@@ -37,8 +38,14 @@ fn catalog() -> &'static Result<Catalog, String> {
 }
 
 pub fn show(query: &mut String, language: Language, ui: &mut Ui) {
-    ui.heading(language.text("Industrial protocol reference", "Справочник промышленных протоколов"));
-    ui.label(language.text("Reference only. Ports are not device identification.", "Справочник. Порт не подтверждает идентификацию устройства."));
+    ui.heading(language.text(
+        "Industrial protocol reference",
+        "Справочник промышленных протоколов",
+    ));
+    ui.label(language.text(
+        "Reference only. Ports are not device identification.",
+        "Справочник. Порт не подтверждает идентификацию устройства.",
+    ));
     let Ok(data) = catalog() else {
         ui.label(language.text("Catalog unavailable", "Каталог недоступен"));
         return;
@@ -47,17 +54,36 @@ pub fn show(query: &mut String, language: Language, ui: &mut Ui) {
     ui.text_edit_singleline(query);
     let needle = query.trim().to_lowercase();
     for entry in &data.entries {
-        if !needle.is_empty() && ![&entry.vendor, &entry.family, &entry.transport, &entry.ports, &entry.purpose, &entry.kind]
-            .iter().any(|value| value.to_lowercase().contains(&needle)) {
+        if !needle.is_empty()
+            && ![
+                &entry.vendor,
+                &entry.family,
+                &entry.transport,
+                &entry.ports,
+                &entry.purpose,
+                &entry.kind,
+            ]
+            .iter()
+            .any(|value| value.to_lowercase().contains(&needle))
+        {
             continue;
         }
         ui.push_id(&entry.id, |ui| {
-            egui::CollapsingHeader::new(format!("{} · {} · {}", entry.vendor, entry.family, entry.ports))
-                .show(ui, |ui| {
-                    ui.label(format!("{} · {} · {}", entry.transport, entry.purpose, entry.kind));
-                    ui.label(&entry.notes);
-                    ui.hyperlink_to(language.text("Primary source", "Первоисточник"), &entry.source);
-                });
+            egui::CollapsingHeader::new(format!(
+                "{} · {} · {}",
+                entry.vendor, entry.family, entry.ports
+            ))
+            .show(ui, |ui| {
+                ui.label(format!(
+                    "{} · {} · {}",
+                    entry.transport, entry.purpose, entry.kind
+                ));
+                ui.label(&entry.notes);
+                ui.hyperlink_to(
+                    language.text("Primary source", "Первоисточник"),
+                    &entry.source,
+                );
+            });
         });
     }
 }
@@ -75,6 +101,10 @@ mod tests {
             assert!(entry.source.starts_with("https://"));
             assert!(!entry.kind.is_empty());
         }
-        assert!(data.entries.iter().any(|e| e.family.contains("NX100") && e.kind == "unverified_port"));
+        assert!(
+            data.entries
+                .iter()
+                .any(|e| e.family.contains("NX100") && e.kind == "unverified_port")
+        );
     }
 }

@@ -1,9 +1,9 @@
 //! Typed routes independent of scanner lifecycle.
 use egui::{RichText, Ui};
 
-use crate::app::App;
 use super::icons::{self, Icon};
 use super::preferences::Language;
+use crate::app::App;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Section {
@@ -18,7 +18,12 @@ pub enum Section {
 
 impl Section {
     pub const ALL: [Self; 6] = [
-        Self::Discovery, Self::Devices, Self::Diagnostics, Self::Knowledge, Self::Reports, Self::Settings,
+        Self::Discovery,
+        Self::Devices,
+        Self::Diagnostics,
+        Self::Knowledge,
+        Self::Reports,
+        Self::Settings,
     ];
 
     pub fn name(self, language: Language) -> &'static str {
@@ -56,7 +61,11 @@ fn item(ui: &mut Ui, icon: Icon, name: &str, expanded: bool, active: bool) -> bo
     );
     let center = egui::pos2(response.rect.left() + 16.0, response.rect.center().y);
     let rect = egui::Rect::from_center_size(center, egui::vec2(20.0, 20.0));
-    let color = if active { super::theme::accent(ui) } else { ui.visuals().text_color() };
+    let color = if active {
+        super::theme::accent(ui)
+    } else {
+        ui.visuals().text_color()
+    };
     icons::paint(ui.painter(), rect, icon, color);
     response.on_hover_text(name).clicked()
 }
@@ -71,7 +80,13 @@ pub fn show(app: &mut App, ui: &mut Ui) -> Option<Section> {
         .default_size(width)
         .size_range(width..=width)
         .show(ui, |ui| {
-            if item(ui, Icon::Menu, language.text("Navigation", "Навигация"), expanded, false) {
+            if item(
+                ui,
+                Icon::Menu,
+                language.text("Navigation", "Навигация"),
+                expanded,
+                false,
+            ) {
                 app.workspace.expanded = !expanded;
                 ui.ctx().request_repaint();
             }
@@ -80,7 +95,13 @@ pub fn show(app: &mut App, ui: &mut Ui) -> Option<Section> {
                 if section == Section::Settings {
                     ui.separator();
                 }
-                if item(ui, section.icon(), section.name(language), expanded, app.workspace.section == section) {
+                if item(
+                    ui,
+                    section.icon(),
+                    section.name(language),
+                    expanded,
+                    app.workspace.section == section,
+                ) {
                     next = Some(section);
                 }
             }

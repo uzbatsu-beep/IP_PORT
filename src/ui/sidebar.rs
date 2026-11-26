@@ -569,7 +569,6 @@ fn summary(app: &App, preview: &Result<ScopePreview, String>, ui: &mut Ui) {
     );
 }
 
-
 pub fn show_oui(app: &mut App, ui: &mut Ui) {
     ui.add_enabled_ui(!app.is_loading_oui(), |ui| {
         ui.horizontal_wrapped(|ui| {
@@ -590,11 +589,20 @@ pub fn show_oui(app: &mut App, ui: &mut Ui) {
     if app.is_loading_oui() {
         ui.horizontal(|ui| {
             ui.spinner();
-            ui.label(RichText::new("Processing IEEE CSV in background...").small().weak());
+            ui.label(
+                RichText::new("Processing IEEE CSV in background...")
+                    .small()
+                    .weak(),
+            );
         });
     }
     let (mal, mam, mas) = app.oui_registry.counts();
-    ui.label(RichText::new(format!("IEEE OUI entries: MA-L {mal} · MA-M {mam} · MA-S {mas}"))
-        .small().weak());
+    ui.label(
+        RichText::new(format!(
+            "IEEE OUI entries: MA-L {mal} · MA-M {mam} · MA-S {mas}"
+        ))
+        .small()
+        .weak(),
+    );
     ui.label(RichText::new(&app.oui_status).small().weak());
 }
