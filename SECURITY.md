@@ -42,3 +42,6 @@
 - При импорте IEEE MA-L/MA-M/MA-S CSV приложение сохраняет **публичные данные о регистрациях производителей** в локальном каталоге пользователя; результаты сканирований туда не записываются. Файлы CSV проверяются, но **не имеют встроенной криптографической проверки подписи IEEE**.
 - Не прикладывайте к публичным Issue пароли, токены, конфиденциальные топологии сети, адреса критичного оборудования, дампы с персональными данными или полный журнал работы с чувствительной инфраструктурой. Предварительно обезличивайте отчёты.
 - Для воспроизведения серьёзных сбоев на Windows смотрите [OPERATIONS.md](OPERATIONS.md), для проверки архивов — [PACKAGING.md](PACKAGING.md).
+
+
+Windows Preview 0.5.0 is a test prerelease, not a replacement for supported stable v0.4.x. [Preview 1](https://github.com/uzbatsu-beep/IP_PORT/releases/tag/preview-windows-v0.5.0-1) uses the exact-SHA Windows gate; manual acceptance and cross-platform acceptance are pending. Do not treat a UDP response or OUI as proof of a device identity; a silent port remains inconclusive.

@@ -33,3 +33,5 @@ These rules apply to the entire repository, including automated contributors.
 - Follow [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md). No tag or public release without explicit approval and verified CI for that commit.
 
 - Preserve mandatory Quality Gate dependencies and fail-closed release verification. No advisory exceptions, new permitted licenses or automatic merges without review. Keep optimized performance scenarios complete and report cold start separately; do not discard measured samples.
+
+- DEC-020: D1/D2/D3 preparation precedes manual D4. Do not mark a manual scenario PASS without evidence. Keep baseline JSON immutable and do not turn diagnostic live timings into gates without approval. C4.3 requires measured bottlenecks after D.

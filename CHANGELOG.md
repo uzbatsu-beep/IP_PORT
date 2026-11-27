@@ -9,6 +9,12 @@
 
 ## [Unreleased]
 
+### ENG-01.D preparation (DEC-020)
+- Reconcile engineering documentation with Windows-first CI and published Preview 1; retain exact-source steady/live baseline JSON, sequential Windows acceptance and technical debt. No runtime changes, new timing gate or completed manual acceptance claimed.
+
+### Published Windows Preview 1 — 2026-11-26 (prerelease)
+- Source commit `0c9108b5bc9e176963404e98ef2b00320adaefa4`; [Windows x64 Preview 1](https://github.com/uzbatsu-beep/IP_PORT/releases/tag/preview-windows-v0.5.0-1). Contains UI-01–03.5 and ENG-01.A–C4.2 listed below; those changes are previewed, not released as stable v0.5.0. Stable v0.4.0 and its history remain unchanged.
+
 ### ENG-01.C4 — Live Performance QA baseline
 - Add eleven deterministic live integration scenarios, test-only phase timing and queue/selection accounting, validated JSON report and artifact upload.
 - Preserve existing timing gates; live timing is diagnostic until measured. Extract path-based export entry point for actual background export testing.
