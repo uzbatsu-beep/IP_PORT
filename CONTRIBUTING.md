@@ -45,7 +45,7 @@ cargo run --locked
    python3 scripts/check_docs.py
    ```
 
-Также выполняются `cargo check --locked --all-targets` и `cargo build --locked --release`. Все команды должны завершаться с кодом `0`. CI дополнительно проверяет `Rust 1.95` (MSRV) и release-сборки Windows/Linux/macOS. Тесты GUI/сетевой логики в CI не заменяют ручную проверку Windows в тестовом сегменте.
+Также выполняются `cargo check --locked --all-targets` и `cargo build --locked --release`. Все команды должны завершаться с кодом `0`. CI дополнительно проверяет `Rust 1.95` (MSRV) и Windows x64 release-сборку; Linux/macOS проверяются отдельно перед стабильным выпуском. Тесты GUI/сетевой логики в CI не заменяют ручную проверку Windows в тестовом сегменте.
 
 ---
 

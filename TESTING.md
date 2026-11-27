@@ -1,20 +1,17 @@
 # План проверки IP / PORT Scanner
 
-**Область:** стабильная версия [v0.4.0](https://github.com/uzbatsu-beep/IP_PORT/releases/tag/v0.4.0), Windows x64 — основной сценарий приёмки; CI — Windows/Linux/macOS. Этот файл является **планом проверки**, а не подтверждением, что каждый ручной сценарий выполнен.
+**Область:** [Windows v0.5.0 Preview 1](https://github.com/uzbatsu-beep/IP_PORT/releases/tag/preview-windows-v0.5.0-1) — текущая ручная приёмка, стабильная v0.4.0 остаётся доступна. Windows x64 — основной сценарий; Linux/macOS отложены до стабильного релиза. [Пошаговая матрица D-01–D-20](qa/acceptance/windows-v0.5.0-preview-1.md) дополняет W-01–W-15. Этот файл является **планом проверки**, а не подтверждением, что каждый ручной сценарий выполнен.
 
 ## 1. Автоматические проверки
 
 Запуск из корня репозитория:
 
 ```bash
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test --all-targets
-python3 scripts/check_docs.py
-cargo build --release
+cargo fmt --all
+python scripts/preflight.py
 ```
 
-В GitHub Actions `.github/workflows/ci.yml` используется Rust **1.95** (MSRV) и платформенная матрица Windows x64, Linux x64, macOS ARM64. Для каждой платформы выполняются Clippy, тесты и оптимизированная сборка. Файл `scripts/check_docs.py` проверяет относительные ссылки в Markdown **офлайн**, без сетевых обращений. Для релизов отдельно выполняется `.github/workflows/release.yml` (включая macOS Intel).
+В `.github/workflows/ci.yml` обычный CI Windows-first: закреплённый Rust 1.100.0, независимый MSRV 1.95.0, Clippy, тесты, steady/live Performance QA, locked build, аудит зависимостей и Quality Gate. Linux/macOS — отдельный Cross-platform Acceptance на точном SHA перед стабильным выпуском. Файл `scripts/check_docs.py` проверяет относительные ссылки в Markdown **офлайн**, без сетевых обращений. Для релизов отдельно выполняется `.github/workflows/release.yml` (включая macOS Intel).
 
 ## 2. Матрица функциональной приёмки Windows
 
@@ -45,7 +42,7 @@ cargo build --release
 ## 4. Критерии допуска к следующему релизу
 
 - CI успешен на актуальном commit SHA, Rust 1.95, Clippy и тесты зелёные.
-- Все обязательные Windows-сценарии W-01—W-14 выполнены либо наглядно отмечены как исключения с обоснованием.
+- Все обязательные Windows-сценарии W-01–W-15 и D-01–D-20 выполнены либо явно отмечены как исключения с обоснованием; критичные P0/P1 блокируют приёмку.
 - В `main` нет одноразовых release-скриптов, открытых серьёзных дефектов и непроверенных изменений.
 - GitHub Release содержит четыре архива и полный `SHA256SUMS.txt`, хэши проверены; [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 - Приёмка в реальном OT-сегменте проводится **только после разрешения владельца сети**, отдельно от лабораторной проверки.
@@ -66,3 +63,6 @@ ENG-01.C3: independent SelectionState tests cover host independence, repeated ob
 
 
 Live QA runs isolated in optimized mode; functional suite excludes this large matrix and verifies its presence. Python report validation rejects missing scenarios, lost observations, inconsistent queues or invalid metrics. New timing thresholds are diagnostic only. Export uses the same background writer via an extracted path-based entry point, avoiding a native file dialog in tests. Linux/macOS remain deferred.
+
+
+DEC-020: D-01–D-20 выполняются последовательно, один сценарий за раз. UDP D-08 имеет отдельные проверяемые состояния и лабораторный сценарий; отсутствие ответа не означает закрытый или открытый порт. Все исходные статусы NOT RUN, результаты заполняются только по факту. D4 фиксирует дефекты и принятие исключений.

@@ -19,7 +19,7 @@ RU/EN currently covers shell labels, not existing scanner controls, diagnostic m
 
 ## Acceptance
 
-- CI: formatting, Markdown links, Clippy, MSRV, tests and optimized builds on Windows/Linux/macOS.
+- CI: formatting, Markdown links, Clippy, MSRV, tests and optimized build on Windows; Linux/macOS acceptance before stable release.
 - Headless tests: initial view, navigation preserves input/results/selection, rendering at 880, 1180 and 1920 points in both shell languages.
 - Manual Windows acceptance: start and stop scans, select Devices/Ports, change appearance from Settings, return to Discovery, verify filter/sort/keyboard shortcuts and export. Check selection, narrow inspector, language labels and icon rendering in both themes and at 100–200% DPI.
 - Existing grouped view is not virtualized for very large datasets; Ports retains the optimized table. Device-view virtualization is UI-03.5. No new network I/O or identities are introduced by the shell.

@@ -1,6 +1,6 @@
 # План разработки IP / PORT Scanner
 
-Последняя актуализация: **2026-11-21**, стабильная версия **v0.4.0** опубликована 2026-11-20. Это план приоритетов, не обещание сроков. Реализованная архитектура — в [ARCHITECTURE.md](ARCHITECTURE.md), проверки и критерии готовности — в [TESTING.md](TESTING.md).
+Последняя актуализация: **2026-11-27** (исторические этапы сохранены), стабильная версия **v0.4.0** опубликована 2026-11-20. Это план приоритетов, не обещание сроков. Реализованная архитектура — в [ARCHITECTURE.md](ARCHITECTURE.md), проверки и критерии готовности — в [TESTING.md](TESTING.md).
 
 ## Цель и принципы
 
@@ -271,7 +271,7 @@
 
 ## Следующие действия без автоматического начала разработки
 
-Сохранить принятые архитектурные решения и вопросы для позднего обсуждения. Продолжить практическую приёмку Windows v0.4.0 по [TESTING.md](TESTING.md). **Не начинать новый крупный модуль до согласования первых конкретных PR**, несмотря на утверждённую последовательность этапов.
+Сохранить принятые архитектурные решения и вопросы для позднего обсуждения. Провести пошаговую приёмку Windows v0.5.0 Preview 1 по [TESTING.md](TESTING.md) и [матрице D-01–D-20](qa/acceptance/windows-v0.5.0-preview-1.md). **Не начинать новый крупный модуль до согласования первых конкретных PR**, несмотря на утверждённую последовательность этапов.
 
 ### Невыполненные технические задачи и ограничения
 
@@ -316,12 +316,13 @@ Shared components, semantic status colors, reusable panel surfaces and table met
 | ENG-01.C2 | Managed ResultsProjection, revision cache, metrics and equivalence | Merged; Windows-first CI passed |
 | ENG-01.C3 | Typed SelectionState, stable IDs and command guards | Merged; Windows-first CI passed |
 | ENG-01.C4.1–C4.2 | Live harness and integration QA (LIVE-01–11) | Merged; Windows-first CI passed |
-| ENG-01.C4.3 | Analyze baseline and optimize measured bottlenecks | After baseline; separate PR if needed |
-| ENG-01.D | Engineering acceptance | Approved; after C |
+| ENG-01.C4.3 | Analyze baseline and optimize measured bottlenecks | Discuss after D; separate PR if needed |
+| ENG-01.D1–D2 + D3 preparation | Engineering audit, baseline, step-by-step Windows acceptance | In review; manual execution pending |
+| ENG-01.D4 | Acceptance report, defect triage and closure | After manual evidence; P0/P1 block closure |
 | UI-03.6 | Universal inspector and evidence sections | Planned; after ENG-01 |
 | UI-03.7 | Complete status bar and RU/EN localization | Planned |
 | UI-03.8 | Integration and Windows acceptance | Planned |
 
 See [UI_WORKSPACE.md](UI_WORKSPACE.md). UI-01 and UI-02 are merged; manual Windows acceptance is still a release gate. Existing grouped-by-host view is transitional; it is not a persistent Asset Store. No new protocol adapters or database are authorized here.
 
-Windows Preview publication: separate workflow proposed for review; no published preview yet. Full stable release acceptance remains unchanged.
+Windows Preview 1 published: [v0.5.0](https://github.com/uzbatsu-beep/IP_PORT/releases/tag/preview-windows-v0.5.0-1), exact source 0c9108b5bc9e176963404e98ef2b00320adaefa4. Full stable release acceptance remains unchanged. Windows-first: Linux/macOS acceptance deferred to stable release (DEC-020).

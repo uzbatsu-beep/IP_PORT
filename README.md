@@ -8,7 +8,9 @@ IP / PORT Scanner — настольный TCP/UDP-сканер сетевых �
 
 > **Безопасность:** запускайте сканирование только по разрешённым адресам. В сегментах АСУ ТП / OT сначала определите допустимую область, исключите PLC, роботов и другое критичное оборудование, согласуйте нагрузку и по умолчанию оставляйте сбор баннеров выключенным. TCP/UDP-зондирование является активным сетевым действием. PTR может отправлять DNS-запросы; чтение уже существующего ARP/NDP-кэша дополнительных зондирующих пакетов не отправляет.
 
-### Быстрый старт v0.4.0
+**Windows Preview для испытаний:** [v0.5.0 Preview 1](https://github.com/uzbatsu-beep/IP_PORT/releases/tag/preview-windows-v0.5.0-1) — отдельный prerelease, не стабильный выпуск. [Пошаговая приёмка](qa/acceptance/windows-v0.5.0-preview-1.md) · [ENG-01.D audit](qa/ENG-01.D-AUDIT.md) · [Технический долг](TECHNICAL_DEBT.md).
+
+### Быстрый старт стабильного v0.4.0
 
 1. Распакуйте архив из GitHub Releases. Перед запуском сравните SHA-256 файла с `SHA256SUMS.txt`; пример приведён в [PACKAGING.md](PACKAGING.md).
 2. В **Targets** введите адреса или CIDR, в **Ports** — список портов, выберите TCP/UDP и при необходимости `Network Interface`.
@@ -135,7 +137,7 @@ cargo test
 
 Цели, приоритеты и критерии готовности этапов описаны в [плане разработки](ROADMAP.md).
 Текущее устройство и технические ограничения описаны в [архитектуре](ARCHITECTURE.md).
-После каждого изменения обновляйте документацию вместе с кодом и запускайте `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets` и `python3 scripts/check_docs.py`. Матричный CI проверяет Windows, Linux и macOS; подробности приведены в [TESTING.md](TESTING.md).
+После каждого изменения обновляйте документацию вместе с кодом и запускайте `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets` и `python3 scripts/check_docs.py`. Обычный CI — Windows-first (Clippy, тесты, Performance QA, сборка и MSRV); Linux/macOS — отдельная приёмка перед стабильным выпуском. Подробности в [TESTING.md](TESTING.md) и [ENGINEERING.md](ENGINEERING.md).
 
 ## Лицензия
 
@@ -163,7 +165,7 @@ UI-03.2 adds six functional routes and collapsible vector navigation, persistent
 UI-03.3 adds a global two-level toolbar: start/stop, profiles, export, scan context, theme and settings. Ctrl/Cmd+O loads a profile and Ctrl/Cmd+S saves one when no scan is active. Reports uses the same command dispatcher; Discovery retains configuration, not duplicated controls.
 
 
-Upcoming v0.5.0 (development): Discovery adds General / Industrial / Custom, curated catalog-derived port candidates by manufacturer/family/protocol, source links, and enhanced ScopePreview. JSON profile v1 remains compatible. The published stable release remains v0.4.0 until the v0.5.0 release workflow completes.
+Windows v0.5.0 Preview 1 (implemented, manual acceptance pending): Discovery adds General / Industrial / Custom, curated catalog-derived port candidates by manufacturer/family/protocol, source links, and enhanced ScopePreview. JSON profile v1 remains compatible. The published stable release remains v0.4.0; the Windows preview is not a stable multi-platform release.
 
 
 UI-03.5 (development): virtualized Devices/Ports, explicit service evidence, combined filters and stable selection; industrial catalog expanded to 56 reference entries. Full factory/model coverage is not claimed.

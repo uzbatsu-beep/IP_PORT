@@ -1,6 +1,6 @@
 # Архитектура и текущее состояние
 
-Актуализировано по релизу **v0.4.0** (2026-11-21). Этот документ описывает реализованную архитектуру, ограничения и исторические проектные решения; актуальные приоритеты — в [ROADMAP.md](ROADMAP.md).
+Актуализировано по Windows Preview 0.5.0 (2026-11-27); нижние исторические разделы v0.4.0 сохранены для трассируемости. Этот документ описывает реализованную архитектуру, ограничения и исторические проектные решения; актуальные приоритеты — в [ROADMAP.md](ROADMAP.md).
 
 ## Назначение
 
@@ -317,3 +317,8 @@ UI-03.5 extends App's cached result view with ResultFilters, independent host so
 
 
 C4.1–C4.2 adds deterministic integration QA over the existing scanner event channel, App frame, store, projection and selection. Frame instrumentation and synthetic worker channel constructor are test-only. The export path split preserves existing native dialog and background writer behavior. No production cache or scanner algorithm changes before measurement.
+
+
+## ENG-01.D — архитектурная приёмка (DEC-020)
+
+Актуальная реализация C1–C4.2: ResultsStore владеет наблюдениями, ResultsProjection хранит индексы и управляет кэшем, SelectionState владеет выбором; UI читает хранилище через App, а не меняет Vec напрямую. Экспорт делает снимок один раз перед фоновым writer, поэтому стоимость снимка остаётся предметом измерения. App координирует очередь, метаданные и сессии. Подтверждение границ и ограничения аудита — [qa/ENG-01.D-AUDIT.md](qa/ENG-01.D-AUDIT.md). UDP: полученная датаграмма подтверждает ответ конечной точки, но не идентичность промышленного протокола; существующий service_verified выставляется по факту ответа, его семантика требует ручной проверки D-08. Не вводятся новые протокольные адаптеры или изменения сканирования в D1/D2.
