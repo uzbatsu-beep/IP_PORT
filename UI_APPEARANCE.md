@@ -20,7 +20,7 @@ Centralize appearance in src/ui/theme.rs. Accent affects selection, links and ac
 
 ## Acceptance
 
-Automated tests cover all 16 combinations, contrast, semantic color stability, persistence overwrite, invalid JSON and unsupported schema. Existing CI runs formatting, Clippy, tests and builds on Windows/Linux/macOS.
+Automated tests cover all 16 combinations, contrast, semantic color stability, persistence overwrite, invalid JSON and unsupported schema. Current routine CI is Windows-first; Linux/macOS acceptance is deferred until stable release.
 
 Manual Windows acceptance: switch all palettes in each theme, inspect sidebar, results, status, RTT visualization and toast, switch while a scan is active, close/reopen, launch from a different working directory, test reset, and verify recovery from a malformed settings file. Verify failed saves are visible and retry succeeds after write access is restored. Windows visual acceptance is required before publishing a release.
 

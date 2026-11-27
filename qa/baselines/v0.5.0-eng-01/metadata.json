@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "source_commit": "0c9108b5bc9e176963404e98ef2b00320adaefa4",
+  "release": "preview-windows-v0.5.0-1",
+  "ci_run_id": 45887472316,
+  "windows_job_id": 140141754713,
+  "source": "Full JSON payloads emitted in successful exact-SHA CI job log; preserved without recomputation. Not a byte-for-byte verification of the downloadable artifact ZIP.",
+  "artifact_id": 15149942078,
+  "artifact_digest": "sha256:07392426afee3b513bf82ceb4a451ae7b413325762110f7324d771c467a8c00b",
+  "steady_scenarios": 8,
+  "live_scenarios": 11,
+  "timing_live_diagnostic_only": true,
+  "manual_acceptance": "NOT RUN",
+  "release_archive_sha256_from_github": "69bb6fa326070483e8543806383af9752674366d2c3d9ac860d25a2939ec36ee"
+}

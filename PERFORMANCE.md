@@ -13,3 +13,8 @@ C2 adds cumulative `projection_metrics` to each scenario (filter_rebuilds, port_
 ## Live Performance QA (DEC-019)
 
 Run `python scripts/performance.py` for existing steady-state QA and LIVE-01–11. The second optimized test uses real App frame/event drainage and a bounded 4096-event mock channel; 64/256/1024 arrivals, bursts, filters, sorts, injected worker metadata, selection, capacity, cancellation/terminal ordering, clear/rescan, background export and combined load. `target/live-performance-report.json` records raw frame samples, queue before/after, data/terminal accounting, event/enrichment/projection times, isolated endpoint lookup, stage counters, RSS and synthetic stop-to-terminal latency. Queue high water is sampled before frames. Throughput is events divided by measured frame CPU/wall time, excluding producer generation and inter-frame waits, not network throughput. Cancellation measures App drainage with a synthetic terminal, not socket cancellation; existing scanner cancellation tests remain. No GPU rendering or actual DNS/network probing. Timings are diagnostic (16 ms mean / 25 ms P95), functional accounting, bounds and complete report are blocking; previous steady-state gates unchanged. C4.3 optimization requires measured evidence.
+
+
+## ENG-01.D2 — permanent baseline
+
+Exact Windows Preview 1 source CI report payloads and provenance are retained in [qa/baselines/v0.5.0-eng-01/README.md](qa/baselines/v0.5.0-eng-01/README.md). LIVE-04 and LIVE-11 exceed diagnostic targets in this run; this is not a new blocking gate. Keep prior steady-state gates unchanged.

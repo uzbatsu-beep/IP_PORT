@@ -9,7 +9,7 @@
 - [ ] `README.md`, `ROADMAP.md`, `ARCHITECTURE.md`, `SECURITY.md`, `PACKAGING.md` и `CHANGELOG.md` актуальны
 - [ ] `rust-toolchain.toml` фиксирует Rust 1.100.0; полный preflight успешно пройден (format/docs, locked check/clippy/test/build); CI для точного SHA успешен
 - [ ] `python3 scripts/check_docs.py` не находит несуществующих локальных ссылок
-- [ ] Матричный CI Windows x64/Linux x64/macOS ARM64 и компиляция Rust 1.95 завершились `SUCCESS`
+- [ ] Windows-first CI и MSRV 1.95 на точном SHA завершились `SUCCESS`; для стабильного тега также успешен отдельный Cross-platform Acceptance на этом SHA
 - [ ] Выполнен Windows smoke-test по [TESTING.md](TESTING.md), критичные сетевые/OT-дефекты исключены
 - [ ] Версия/тег ещё не существуют или принято отдельное решение о корректирующем выпуске; опубликованные теги не переписываются
 
@@ -41,9 +41,11 @@ ENG-01.B: the release workflow requires the exact checked-out tag commit to have
 
 - [ ] All four packages contain THIRD_PARTY_NOTICES.md and the original font notices under third-party/epaint_default_fonts; verify the bundled dependency version and remaining third-party license obligations before release.
 
-## Windows Preview (proposed separate prerelease channel)
+## Windows Preview (separate prerelease channel)
 
-- [ ] Merge and verify the Windows Preview workflow before use. On Actions → Windows Preview Release, select `main` and a new preview number.
+- [x] Windows Preview workflow merged (PR #27) and executed successfully for Preview 1. On Actions → Windows Preview Release, select `main` and a new preview number.
 - [ ] Latest exact-SHA main CI, Windows QA and Quality Gate must pass both before build and before publication.
 - [ ] Check the locked Windows x64 ZIP, license notices and SHA256SUMS.txt. A new `preview-windows-vX.Y.Z-N` tag is created only on the tested SHA; no existing tags may be reused.
 - [ ] Mark as prerelease, not Latest. Manual Windows/equipment QA and Linux/macOS remain pending; disclose in notes. Stable `vX.Y.Z` policy is unchanged.
+
+Preview 1: [release](https://github.com/uzbatsu-beep/IP_PORT/releases/tag/preview-windows-v0.5.0-1), [workflow](https://github.com/uzbatsu-beep/IP_PORT/actions/runs/45889664961), [exact main CI](https://github.com/uzbatsu-beep/IP_PORT/actions/runs/45887472316). These are historical publication facts, not a completed manual acceptance. Stable multi-platform checklist remains open. D-01 verifies downloaded bytes against the manifest, not just asset metadata.

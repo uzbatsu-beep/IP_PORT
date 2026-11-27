@@ -206,4 +206,7 @@ Release and CI artifacts include [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md
 
 ## Windows-only preview releases
 
-The proposed [Windows Preview Release workflow](.github/workflows/windows-preview.yml) is manually dispatched on `main`. It checks latest exact-SHA main CI and the Windows job plus Quality Gate, builds the pinned locked x64 binary, packages the root documentation and notices, verifies ZIP and SHA-256, and publishes a prerelease under `preview-windows-vX.Y.Z-N`. It refuses existing tag names. This does not replace the stable four-platform release, which still requires cross-platform acceptance. Manual equipment testing remains pending. The stable Latest badge will remain on the last stable release.
+The implemented [Windows Preview Release workflow](.github/workflows/windows-preview.yml) is manually dispatched on `main`. It checks latest exact-SHA main CI and the Windows job plus Quality Gate, builds the pinned locked x64 binary, packages the root documentation and notices, verifies ZIP and SHA-256, and publishes a prerelease under `preview-windows-vX.Y.Z-N`. It refuses existing tag names. This does not replace the stable four-platform release, which still requires cross-platform acceptance. Manual equipment testing remains pending. The stable Latest badge will remain on the last stable release.
+
+
+Published [Windows v0.5.0 Preview 1](https://github.com/uzbatsu-beep/IP_PORT/releases/tag/preview-windows-v0.5.0-1), source `0c9108b5bc9e176963404e98ef2b00320adaefa4`; [successful publication](https://github.com/uzbatsu-beep/IP_PORT/actions/runs/45889664961). For D-01 use the preview archive and its matching SHA256SUMS.txt, not the stable v0.4.0 archive example above. See [manual acceptance](qa/acceptance/windows-v0.5.0-preview-1.md).
